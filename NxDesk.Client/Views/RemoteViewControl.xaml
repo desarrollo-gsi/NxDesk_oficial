@@ -1,0 +1,10 @@
+﻿<UserControl x:Class="NxDesk.Client.Views.RemoteViewControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" >
+    <Border Background="#121212" ClipToBounds="True">
+        <Image x:Name="VideoImage"
+              Stretch="Uniform"
+              RenderOptions.BitmapScalingMode="HighQuality"
+              Cursor="Cross"/>
+    </Border>
+</UserControl>

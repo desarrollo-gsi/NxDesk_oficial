@@ -1,0 +1,6 @@
+@NxDesk.SignalingServer_HostAddress = http://localhost:5254
+
+GET {{NxDesk.SignalingServer_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

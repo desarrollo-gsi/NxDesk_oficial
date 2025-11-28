@@ -1,0 +1,52 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.12.35514.174
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxDesk.Domain", "Domain\NxDesk.Domain.csproj", "{EDABB052-F26C-4A48-B568-527597AC93DD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxDesk.Application", "NxDesk.Application\NxDesk.Application.csproj", "{07A14B0A-B2E1-4572-83FD-3B2E66AC2F38}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxDesk.Infrastructure", "NxDesk.Infrastructure\NxDesk.Infrastructure.csproj", "{AEEBC8D0-1C4D-4BF9-A5E4-DD67817ACD16}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxDesk.Client", "NxDesk.Client\NxDesk.Client.csproj", "{20F4DC8A-573C-4891-9B08-9F96A6D558B4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxDesk.Host", "NxDesk.Host\NxDesk.Host.csproj", "{5DEFA20C-CC6D-4A46-A041-7D566C50A7AF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxDesk.SignalingServer", "NxDesk.SignalingServer\NxDesk.SignalingServer.csproj", "{F3FE24AE-F143-4A11-83D7-4196CDBAD20A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EDABB052-F26C-4A48-B568-527597AC93DD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EDABB052-F26C-4A48-B568-527597AC93DD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EDABB052-F26C-4A48-B568-527597AC93DD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EDABB052-F26C-4A48-B568-527597AC93DD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{07A14B0A-B2E1-4572-83FD-3B2E66AC2F38}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{07A14B0A-B2E1-4572-83FD-3B2E66AC2F38}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{07A14B0A-B2E1-4572-83FD-3B2E66AC2F38}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{07A14B0A-B2E1-4572-83FD-3B2E66AC2F38}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AEEBC8D0-1C4D-4BF9-A5E4-DD67817ACD16}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AEEBC8D0-1C4D-4BF9-A5E4-DD67817ACD16}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AEEBC8D0-1C4D-4BF9-A5E4-DD67817ACD16}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AEEBC8D0-1C4D-4BF9-A5E4-DD67817ACD16}.Release|Any CPU.Build.0 = Release|Any CPU
+		{20F4DC8A-573C-4891-9B08-9F96A6D558B4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{20F4DC8A-573C-4891-9B08-9F96A6D558B4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{20F4DC8A-573C-4891-9B08-9F96A6D558B4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{20F4DC8A-573C-4891-9B08-9F96A6D558B4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5DEFA20C-CC6D-4A46-A041-7D566C50A7AF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5DEFA20C-CC6D-4A46-A041-7D566C50A7AF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5DEFA20C-CC6D-4A46-A041-7D566C50A7AF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5DEFA20C-CC6D-4A46-A041-7D566C50A7AF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F3FE24AE-F143-4A11-83D7-4196CDBAD20A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F3FE24AE-F143-4A11-83D7-4196CDBAD20A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F3FE24AE-F143-4A11-83D7-4196CDBAD20A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F3FE24AE-F143-4A11-83D7-4196CDBAD20A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
