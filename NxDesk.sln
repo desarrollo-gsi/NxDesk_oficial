@@ -10,6 +10,10 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxDesk.Infrastructure", "NxDesk.Infrastructure\NxDesk.Infrastructure.csproj", "{AEEBC8D0-1C4D-4BF9-A5E4-DD67817ACD16}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxDesk.Client", "NxDesk.Client\NxDesk.Client.csproj", "{20F4DC8A-573C-4891-9B08-9F96A6D558B4}"
+	ProjectSection(ProjectDependencies) = postProject
+		{5DEFA20C-CC6D-4A46-A041-7D566C50A7AF} = {5DEFA20C-CC6D-4A46-A041-7D566C50A7AF}
+		{F3FE24AE-F143-4A11-83D7-4196CDBAD20A} = {F3FE24AE-F143-4A11-83D7-4196CDBAD20A}
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxDesk.Host", "NxDesk.Host\NxDesk.Host.csproj", "{5DEFA20C-CC6D-4A46-A041-7D566C50A7AF}"
 EndProject

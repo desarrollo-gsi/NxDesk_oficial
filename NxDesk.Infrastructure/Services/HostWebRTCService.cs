@@ -4,10 +4,8 @@ using NxDesk.Application.Interfaces;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
 using SIPSorceryMedia.Encoders;
-using System.Drawing; // UseWindowsForms=true habilita esto
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
 using System.Text;
 
 namespace NxDesk.Infrastructure.Services
@@ -45,11 +43,9 @@ namespace NxDesk.Infrastructure.Services
                 var config = new RTCConfiguration { iceServers = new List<RTCIceServer> { new RTCIceServer { urls = "stun:stun.l.google.com:19302" } } };
                 _peerConnection = new RTCPeerConnection(config);
 
-                // Configurar pista de video (SendOnly)
                 var videoTrack = new MediaStreamTrack(new List<VideoFormat> { new VideoFormat(VideoCodecsEnum.VP8, 96) }, MediaStreamStatusEnum.SendOnly);
                 _peerConnection.addTrack(videoTrack);
 
-                // Manejo de Inputs desde el DataChannel
                 _peerConnection.ondatachannel += (dc) =>
                 {
                     dc.onopen += () => SendScreenList(dc);
@@ -64,7 +60,6 @@ namespace NxDesk.Infrastructure.Services
                     }
                 };
 
-                // Aceptar oferta y crear respuesta
                 _peerConnection.setRemoteDescription(new RTCSessionDescriptionInit { type = RTCSdpType.offer, sdp = SDP.ParseSDPDescription(message.Payload).ToString() });
                 var answer = _peerConnection.createAnswer(null);
                 await _peerConnection.setLocalDescription(answer);
@@ -76,7 +71,6 @@ namespace NxDesk.Infrastructure.Services
                     SenderId = _signalingService.GetConnectionId()
                 });
 
-                // Iniciar captura
                 _isCapturing = true;
                 Task.Run(CaptureLoop);
             }
@@ -107,7 +101,7 @@ namespace NxDesk.Infrastructure.Services
                     }
                 }
                 catch { }
-                await Task.Delay(33); // ~30 FPS
+                await Task.Delay(33); 
             }
         }
 
@@ -117,9 +111,8 @@ namespace NxDesk.Infrastructure.Services
             if (_currentScreenIndex >= screens.Length) _currentScreenIndex = 0;
             var bounds = screens[_currentScreenIndex].Bounds;
 
-            // Redimensionar si es muy grande (opcional, para rendimiento)
             int w = bounds.Width > 1920 ? 1920 : bounds.Width;
-            int h = bounds.Height > 1080 ? 1080 : bounds.Height; // Aproximación simple
+            int h = bounds.Height > 1080 ? 1080 : bounds.Height; 
 
             var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(bmp))
