@@ -261,7 +261,8 @@
                                 Width="32" Height="32"
                                 Margin="0,0,3,0"
                                 ToolTip="Conectar"
-                                Style="{StaticResource ModernIconButton}">
+                                Style="{StaticResource ModernIconButton}"
+                                Click="ConnectButton_Click">
                                 <Path Data="M12,4l-1.41,1.41L16.17,11H4v2h12.17l-5.58,5.59L12,20l8-8L12,4z"
                                   Fill="#007ACC"
                                   Stretch="Uniform"
@@ -280,7 +281,8 @@
                         <Button x:Name="DisconnectButton"
                             Content="Desconectar"
                             Style="{StaticResource DisconnectButton}"
-                            Margin="20,0,0,0"/>
+                            Margin="20,0,0,0"
+                            Click="DisconnectButton_Click"/>
                     </StackPanel>
 
                     <StackPanel Grid.Column="2"
@@ -326,8 +328,12 @@
             <Border Grid.Row="2" Background="Transparent" Padding="12,6">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="Estado:" Foreground="White" FontWeight="SemiBold" Margin="0,0,5,0"/>
+                    <!-- 
+                         CORRECCIÓN AQUÍ: Agregamos {Binding StatusText} 
+                         Antes tenía texto fijo "Esperando conexión..." que no cambiaba.
+                    -->
                     <TextBlock x:Name="StatusTextBlock"
-                         Text="Esperando conexión..." Foreground="White" Opacity="0.9"/>
+                         Text="{Binding StatusText}" Foreground="White" Opacity="0.9"/>
                 </StackPanel>
             </Border>
         </Grid>

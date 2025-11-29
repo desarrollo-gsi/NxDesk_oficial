@@ -121,6 +121,10 @@ namespace NxDesk.Client.ViewModels
 
         private void HandleVideoFrame(byte[] frameData)
         {
+            // --- LOG PARA DEPURAR ---
+            // Si ves esto en la consola, el video está llegando.
+            Debug.WriteLine($"[ViewModel] Frame recibido: {frameData.Length} bytes");
+
             System.Windows.Application.Current.Dispatcher.Invoke(() => {
                 try
                 {

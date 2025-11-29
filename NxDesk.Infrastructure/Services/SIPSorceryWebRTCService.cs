@@ -16,7 +16,6 @@ namespace NxDesk.Infrastructure.Services
         private RTCPeerConnection _peerConnection;
         private RTCDataChannel _dataChannel;
 
-        // Eventos definidos en la interfaz
         public event Action<string> OnConnectionStateChanged;
         public event Action<byte[]> OnVideoFrameReceived;
         public event Action<List<string>> OnScreensInfoReceived;
@@ -24,8 +23,6 @@ namespace NxDesk.Infrastructure.Services
         public SIPSorceryWebRTCService(ISignalingService signalingService)
         {
             _signalingService = signalingService;
-
-            // Nos suscribimos a los mensajes que llegan del servidor (Answer, ICE Candidates)
             _signalingService.OnMessageReceived += HandleSignalingMessageAsync;
         }
 
@@ -34,32 +31,31 @@ namespace NxDesk.Infrastructure.Services
             Debug.WriteLine($"[Service] Intentando conectar a SignalR...");
             OnConnectionStateChanged?.Invoke("Conectando al servidor...");
 
-            // 1. Intentar conectar a SignalR primero
             bool connected = await _signalingService.ConnectAsync(hostId);
 
             if (!connected)
             {
-                Debug.WriteLine("[Service] FALLÓ la conexión a SignalR (ConnectAsync devolvió false).");
                 OnConnectionStateChanged?.Invoke("Error: No se pudo conectar al servidor de señalización.");
                 return false;
             }
-            Debug.WriteLine("[Service] Conexión SignalR EXITOSA. Configurando WebRTC...");
             OnConnectionStateChanged?.Invoke("Conectado. Iniciando WebRTC...");
 
-            // 2. Configuración de WebRTC (Servidores STUN)
+            // --- MEJORA: Lista de servidores STUN más robusta ---
             var config = new RTCConfiguration
             {
                 iceServers = new List<RTCIceServer>
                 {
-                    new RTCIceServer { urls = "stun:stun.l.google.com:19302" }
+                    new RTCIceServer { urls = "stun:stun.l.google.com:19302" },
+                    new RTCIceServer { urls = "stun:stun1.l.google.com:19302" },
+                    new RTCIceServer { urls = "stun:stun2.l.google.com:19302" }
                 }
             };
 
             _peerConnection = new RTCPeerConnection(config);
 
-            // 3. Manejar candidatos ICE locales (se generan al crear la oferta)
             _peerConnection.onicecandidate += async (candidate) =>
             {
+                // Solo enviar candidatos válidos
                 if (candidate != null && !string.IsNullOrWhiteSpace(candidate.candidate))
                 {
                     var msg = new SdpMessage
@@ -72,37 +68,34 @@ namespace NxDesk.Infrastructure.Services
                 }
             };
 
-            // 4. Monitorear estado de la conexión
             _peerConnection.onconnectionstatechange += (state) =>
             {
-                OnConnectionStateChanged?.Invoke($"Estado P2P: {state}");
+                Debug.WriteLine($"[WebRTC State] {state}");
 
-                if (state == RTCPeerConnectionState.connected)
+                // Mapear estados a mensajes amigables
+                string statusMsg = state switch
                 {
-                    OnConnectionStateChanged?.Invoke("Conexión establecida.");
-                }
-                else if (state == RTCPeerConnectionState.failed)
-                {
-                    OnConnectionStateChanged?.Invoke("Fallo en la conexión P2P.");
-                }
+                    RTCPeerConnectionState.connected => "Conexión establecida. Recibiendo video...",
+                    RTCPeerConnectionState.failed => "Fallo en la conexión P2P. Reintentando...",
+                    RTCPeerConnectionState.disconnected => "Desconectado.",
+                    RTCPeerConnectionState.closed => "Cerrado.",
+                    _ => $"Conectando... ({state})"
+                };
+
+                OnConnectionStateChanged?.Invoke(statusMsg);
             };
 
-            // 5. Recibir Video
             _peerConnection.OnVideoFrameReceived += (endpoint, timestamp, frame, format) =>
             {
-                // Pasamos el frame crudo (byte[]) hacia la capa de Aplicación/UI
                 OnVideoFrameReceived?.Invoke(frame);
             };
 
-            // 6. Crear DataChannel para enviar Inputs (Mouse/Teclado)
             _dataChannel = await _peerConnection.createDataChannel("input-channel");
             SetupDataChannel();
 
-            // 7. Crear la Oferta SDP (Somos el que inicia la llamada)
             var offer = _peerConnection.createOffer(null);
             await _peerConnection.setLocalDescription(offer);
 
-            // 8. Enviar la oferta al Host a través de SignalR
             var sdpMsg = new SdpMessage
             {
                 Type = "offer",
@@ -119,18 +112,15 @@ namespace NxDesk.Infrastructure.Services
             _dataChannel.onopen += () =>
             {
                 OnConnectionStateChanged?.Invoke("Canal de datos abierto.");
-                // Al abrirse, pedimos la lista de pantallas del host
                 RequestScreenList();
             };
 
             _dataChannel.onmessage += (RTCDataChannel channel, DataChannelPayloadProtocols protocol, byte[] data) =>
             {
-                // Procesar mensajes que vienen del Host (ej. lista de pantallas)
                 var json = Encoding.UTF8.GetString(data);
                 try
                 {
                     var msg = JsonConvert.DeserializeObject<DataChannelMessage>(json);
-
                     if (msg?.Type == "system:screen_info")
                     {
                         var info = JsonConvert.DeserializeObject<ScreenInfoPayload>(msg.Payload);
@@ -140,10 +130,7 @@ namespace NxDesk.Infrastructure.Services
                         }
                     }
                 }
-                catch
-                {
-                    // Ignorar mensajes mal formados
-                }
+                catch { }
             };
         }
 
@@ -151,11 +138,7 @@ namespace NxDesk.Infrastructure.Services
         {
             if (_dataChannel != null && _dataChannel.readyState == RTCDataChannelState.open)
             {
-                var msg = new DataChannelMessage
-                {
-                    Type = "system:get_screens",
-                    Payload = ""
-                };
+                var msg = new DataChannelMessage { Type = "system:get_screens", Payload = "" };
                 _dataChannel.send(JsonConvert.SerializeObject(msg));
             }
         }
@@ -165,11 +148,7 @@ namespace NxDesk.Infrastructure.Services
             if (_dataChannel != null && _dataChannel.readyState == RTCDataChannelState.open)
             {
                 var payload = JsonConvert.SerializeObject(inputEvent);
-                var wrapper = new DataChannelMessage
-                {
-                    Type = "input",
-                    Payload = payload
-                };
+                var wrapper = new DataChannelMessage { Type = "input", Payload = payload };
                 _dataChannel.send(JsonConvert.SerializeObject(wrapper));
             }
         }
@@ -182,7 +161,6 @@ namespace NxDesk.Infrastructure.Services
             {
                 if (message.Type == "answer")
                 {
-                    // El Host aceptó nuestra oferta
                     var result = _peerConnection.setRemoteDescription(new RTCSessionDescriptionInit
                     {
                         type = RTCSdpType.answer,
@@ -191,14 +169,13 @@ namespace NxDesk.Infrastructure.Services
                 }
                 else if (message.Type == "ice-candidate")
                 {
-                    // El Host nos envió un candidato de red para conectar
                     var candidate = JsonConvert.DeserializeObject<RTCIceCandidateInit>(message.Payload);
                     _peerConnection.addIceCandidate(candidate);
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[WebRTC Error] {ex.Message}");
+                Debug.WriteLine($"[WebRTC Error] {ex.Message}");
             }
         }
 
@@ -216,7 +193,6 @@ namespace NxDesk.Infrastructure.Services
                 _peerConnection = null;
             }
 
-            // Desuscribirse del evento para evitar fugas de memoria si se reusa el servicio
             if (_signalingService != null)
             {
                 _signalingService.OnMessageReceived -= HandleSignalingMessageAsync;

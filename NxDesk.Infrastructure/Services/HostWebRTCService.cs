@@ -23,7 +23,16 @@ namespace NxDesk.Infrastructure.Services
         {
             _signalingService = signalingService;
             _inputSimulator = inputSimulator;
-            _vpxEncoder = new VpxVideoEncoder();
+
+            try
+            {
+                _vpxEncoder = new VpxVideoEncoder();
+            }
+            catch (Exception ex)
+            {
+                Log($"[CRITICAL] Error al crear encoder: {ex.Message}");
+                throw;
+            }
 
             _signalingService.OnMessageReceived += HandleSignalingMessage;
         }
@@ -31,14 +40,14 @@ namespace NxDesk.Infrastructure.Services
         public async Task StartAsync(string hostId)
         {
             await _signalingService.ConnectAsync(hostId);
-            Console.WriteLine($"[Host] Esperando clientes en sala: {hostId}");
+            Log($"[Host] Esperando clientes en sala: {hostId}");
         }
 
         private async Task HandleSignalingMessage(SdpMessage message)
         {
             if (message.Type == "offer")
             {
-                Console.WriteLine("[Host] Oferta recibida. Iniciando conexión...");
+                Log("[Host] Oferta recibida. Iniciando conexión...");
 
                 var config = new RTCConfiguration { iceServers = new List<RTCIceServer> { new RTCIceServer { urls = "stun:stun.l.google.com:19302" } } };
                 _peerConnection = new RTCPeerConnection(config);
@@ -83,7 +92,7 @@ namespace NxDesk.Infrastructure.Services
 
         private async Task CaptureLoop()
         {
-            Console.WriteLine("[Host] Iniciando transmisión de pantalla...");
+            Log("[Host] Iniciando bucle de captura...");
             while (_isCapturing && _peerConnection != null)
             {
                 try
@@ -93,6 +102,7 @@ namespace NxDesk.Infrastructure.Services
                         if (bitmap != null)
                         {
                             var rawBuffer = BitmapToBytes(bitmap);
+
                             var encoded = _vpxEncoder.EncodeVideo(bitmap.Width, bitmap.Height, rawBuffer, VideoPixelFormatsEnum.Bgra, VideoCodecsEnum.VP8);
 
                             if (encoded != null)
@@ -100,9 +110,23 @@ namespace NxDesk.Infrastructure.Services
                         }
                     }
                 }
-                catch { }
-                await Task.Delay(33); 
+                catch (Exception ex)
+                {
+                    Log($"[VIDEO ERROR] {ex}");
+                    await Task.Delay(1000);
+                }
+                await Task.Delay(33);
             }
+        }
+
+        private void Log(string message)
+        {
+            try
+            {
+                string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "host_debug.log");
+                File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}");
+            }
+            catch { }
         }
 
         private Bitmap CaptureScreen()
@@ -112,13 +136,12 @@ namespace NxDesk.Infrastructure.Services
             var bounds = screens[_currentScreenIndex].Bounds;
 
             int w = bounds.Width > 1920 ? 1920 : bounds.Width;
-            int h = bounds.Height > 1080 ? 1080 : bounds.Height; 
+            int h = bounds.Height > 1080 ? 1080 : bounds.Height;
 
             var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(bmp))
             {
-                g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, new Size(w, h)); // Captura simple (crop si es más grande)
-                // Nota: Tu código original tenía lógica de redimensionado más compleja, puedes copiarla aquí si prefieres.
+                g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, new Size(w, h));
             }
             return bmp;
         }
@@ -154,14 +177,13 @@ namespace NxDesk.Infrastructure.Services
                     else if (ev.EventType == "control" && ev.Command == "switch_screen")
                     {
                         _currentScreenIndex = ev.Value ?? 0;
-                        SendScreenList(_dataChannel); // Actualizar lista si fuera necesario
+                        SendScreenList(_dataChannel);
                     }
                 }
             }
             catch { }
         }
 
-        // Variable auxiliar para el canal de datos
         private RTCDataChannel _dataChannel;
         private void SendScreenList(RTCDataChannel dc)
         {

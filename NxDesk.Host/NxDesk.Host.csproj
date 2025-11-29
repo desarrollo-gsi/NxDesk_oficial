@@ -1,23 +1,40 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
 
-  <PropertyGroup>
-	  <TargetFramework>net8.0-windows10.0.26100.0</TargetFramework>
-	  <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <UserSecretsId>dotnet-NxDesk.Host-1dadc416-c22f-4d88-9c0c-794f9adf7581</UserSecretsId>
+	<PropertyGroup>
+		<TargetFramework>net8.0-windows10.0.26100.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<UserSecretsId>dotnet-NxDesk.Host-1dadc416-c22f-4d88-9c0c-794f9adf7581</UserSecretsId>
+		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+		<UseWindowsForms>true</UseWindowsForms>
+		<OutputType>Exe</OutputType>
+		<!-- Esto fuerza la arquitectura a x64 para asegurar compatibilidad con las DLLs -->
+		<PlatformTarget>x64</PlatformTarget>
+	</PropertyGroup>
 
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
+		<!-- Aseguramos que estas dependencias estén aquí también -->
+		<PackageReference Include="SIPSorcery" Version="8.0.0" />
+		<PackageReference Include="SIPSorceryMedia.Encoders" Version="8.0.7" />
+	</ItemGroup>
 
-	  <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-	  <UseWindowsForms>true</UseWindowsForms>
-	  <OutputType>Exe</OutputType>
-  </PropertyGroup>
+	<ItemGroup>
+		<ProjectReference Include="..\NxDesk.Application\NxDesk.Application.csproj" />
+		<ProjectReference Include="..\NxDesk.Infrastructure\NxDesk.Infrastructure.csproj" />
+	</ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.0" />
-  </ItemGroup>
+	<!-- 
+     SCRIPT DE RESCATE DE DLLs:
+     Este bloque busca las DLLs nativas en la caché de NuGet y las copia 
+     a la carpeta de salida cada vez que compilas.
+  -->
+	<Target Name="CopyNativeBinaries" AfterTargets="Build">
+		<ItemGroup>
+			<NativeLibs Include="$(UserProfile)\.nuget\packages\sipsorcerymedia.encoders\8.0.7\build\x64\*.dll" />
+		</ItemGroup>
+		<Copy SourceFiles="@(NativeLibs)" DestinationFolder="$(OutDir)runtimes\win-x64\native" SkipUnchangedFiles="true" />
+		<Message Text="[NxDesk Host] DLLs nativas de video (libvpx, libyuv) copiadas manualmente a runtimes/win-x64/native" Importance="high" />
+	</Target>
 
-  <ItemGroup>
-    <ProjectReference Include="..\NxDesk.Application\NxDesk.Application.csproj" />
-    <ProjectReference Include="..\NxDesk.Infrastructure\NxDesk.Infrastructure.csproj" />
-  </ItemGroup>
 </Project>

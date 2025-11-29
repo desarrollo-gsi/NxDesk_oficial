@@ -1,5 +1,5 @@
 ﻿using Microsoft.AspNetCore.SignalR.Client;
-using Microsoft.Extensions.Configuration; 
+using Microsoft.Extensions.Configuration;
 using NxDesk.Application.DTOs;
 using NxDesk.Application.Interfaces;
 using System.Diagnostics;
@@ -16,7 +16,16 @@ namespace NxDesk.Infrastructure.Services
 
         public SignalRSignalingService(IConfiguration configuration)
         {
-            _serverUrl = configuration["SignalR:ServerUrl"] ?? "https://localhost:7099/signalinghub";
+            // LEER URL: Asegúrate de que en appsettings.json la clave sea "SignalR:ServerUrl"
+            string configUrl = configuration["SignalR:ServerUrl"];
+
+            // LOG CRÍTICO: Ver qué URL se leyó
+            Debug.WriteLine($"[SignalR Config] URL leída de appsettings: '{configUrl}'");
+
+            // Si es nula, usar fallback (pero esto indica que appsettings falló)
+            _serverUrl = !string.IsNullOrEmpty(configUrl) ? configUrl : "http://localhost:5000/signalinghub";
+
+            Debug.WriteLine($"[SignalR Config] URL final a usar: '{_serverUrl}'");
 
             _hubConnection = new HubConnectionBuilder()
                 .WithUrl(_serverUrl, options =>
@@ -52,16 +61,22 @@ namespace NxDesk.Infrastructure.Services
             {
                 if (_hubConnection.State == HubConnectionState.Disconnected)
                 {
+                    Debug.WriteLine("[SignalR] Iniciando conexión...");
                     await _hubConnection.StartAsync();
+                    Debug.WriteLine("[SignalR] Conexión establecida.");
                 }
 
                 await _hubConnection.InvokeAsync("JoinRoom", _roomId);
-                Debug.WriteLine($"[SignalR] Conectado a la sala: {_roomId}");
+                Debug.WriteLine($"[SignalR] Unido a la sala: {_roomId}");
                 return true;
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[SignalR Error] {ex.Message}");
+                Debug.WriteLine($"[SignalR Error] Fallo al conectar a {_serverUrl}: {ex.Message}");
+                if (ex.InnerException != null)
+                {
+                    Debug.WriteLine($"[SignalR Error Inner] {ex.InnerException.Message}");
+                }
                 return false;
             }
         }
