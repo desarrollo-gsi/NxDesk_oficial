@@ -6,6 +6,7 @@ using System.Windows.Media.Imaging;
 using System.IO;
 using System.Windows;
 using System.Windows.Input; // Para ICommand
+using System.Diagnostics; // <--- AGREGAR ESTO
 
 namespace NxDesk.Client.ViewModels
 {
@@ -55,10 +56,36 @@ namespace NxDesk.Client.ViewModels
 
         public async Task Connect(string hostId)
         {
-            if (string.IsNullOrWhiteSpace(hostId)) return;
+            Debug.WriteLine($"[ViewModel] Iniciando conexión hacia: {hostId}");
+
+            if (string.IsNullOrWhiteSpace(hostId))
+            {
+                Debug.WriteLine("[ViewModel] ID inválido, cancelando.");
+                return;
+            }
+
             StatusText = "Conectando...";
-            await _webRTCService.StartConnectionAsync(hostId);
-            IsConnected = true;
+
+            try
+            {
+                Debug.WriteLine("[ViewModel] Llamando a WebRTCService.StartConnectionAsync...");
+
+                // Si ya cambiaste la interfaz a bool, usa esto:
+                // bool success = await _webRTCService.StartConnectionAsync(hostId);
+                // Debug.WriteLine($"[ViewModel] Resultado de conexión: {success}");
+
+                // Si sigues con la versión void Task:
+                await _webRTCService.StartConnectionAsync(hostId);
+                Debug.WriteLine("[ViewModel] WebRTCService terminó su ejecución (aparentemente exitosa).");
+
+                IsConnected = true;
+                Debug.WriteLine("[ViewModel] Estado cambiado a IsConnected = true");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ViewModel] ERROR al conectar: {ex}");
+                StatusText = $"Error: {ex.Message}";
+            }
         }
 
         public async Task Disconnect()

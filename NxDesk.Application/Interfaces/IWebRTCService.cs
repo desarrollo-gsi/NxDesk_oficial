@@ -4,7 +4,9 @@ namespace NxDesk.Application.Interfaces
 {
     public interface IWebRTCService
     {
-        Task StartConnectionAsync(string hostId);
+        // CAMBIO: Ahora devuelve Task<bool> en lugar de Task
+        Task<bool> StartConnectionAsync(string hostId);
+
         void SendInputEvent(InputEvent inputEvent);
         Task DisposeAsync();
 

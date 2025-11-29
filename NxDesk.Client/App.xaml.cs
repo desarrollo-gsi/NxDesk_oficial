@@ -45,7 +45,7 @@ namespace NxDesk.Client
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error al iniciar servicios en segundo plano:\n{ex.Message}", "Error de Inicio", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Error crítico al iniciar servicios en segundo plano:\n{ex.Message}", "Error de Inicio", MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
             // --- 3. CONFIGURACIÓN (Appsettings y DI) ---
@@ -89,12 +89,15 @@ namespace NxDesk.Client
 
         private void StartSignalingServer()
         {
-            // Busca el exe en la carpeta actual (Publicación) o en la carpeta de desarrollo relativa
-            string serverPath = FindExecutable("NxDesk.SignalingServer.exe", "NxDesk.SignalingServer");
+            // Gracias al cambio en el .csproj, el archivo DEBE estar en la misma carpeta base
+            string fileName = "NxDesk.SignalingServer.exe";
+            string serverPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
 
-            if (string.IsNullOrEmpty(serverPath))
+            if (!File.Exists(serverPath))
             {
-                Debug.WriteLine("Advertencia: No se encontró NxDesk.SignalingServer.exe");
+                // AVISO IMPORTANTE: Si ves este error, haz "Rebuild Solution" para que el script del csproj copie los archivos.
+                MessageBox.Show($"No se encontró el archivo: {fileName}\nUbicación buscada: {serverPath}\n\nIntenta recompilar la solución.",
+                                "Falta Componente", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
@@ -103,11 +106,13 @@ namespace NxDesk.Client
 
         private void StartHostService()
         {
-            string hostPath = FindExecutable("NxDesk.Host.exe", "NxDesk.Host");
+            string fileName = "NxDesk.Host.exe";
+            string hostPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
 
-            if (string.IsNullOrEmpty(hostPath))
+            if (!File.Exists(hostPath))
             {
-                Debug.WriteLine("Advertencia: No se encontró NxDesk.Host.exe");
+                MessageBox.Show($"No se encontró el archivo: {fileName}\nUbicación buscada: {hostPath}\n\nIntenta recompilar la solución.",
+                                "Falta Componente", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
@@ -118,7 +123,7 @@ namespace NxDesk.Client
         {
             try
             {
-                // Matar procesos previos si quedaron colgados (opcional, pero recomendado en desarrollo)
+                // Matar procesos previos si quedaron colgados (opcional, útil en desarrollo)
                 string processName = Path.GetFileNameWithoutExtension(filePath);
                 foreach (var p in Process.GetProcessesByName(processName))
                 {
@@ -127,7 +132,7 @@ namespace NxDesk.Client
 
                 var startInfo = new ProcessStartInfo(filePath)
                 {
-                    CreateNoWindow = true,        // No mostrar consola negra (Server/Host ocultos)
+                    CreateNoWindow = true,        // No mostrar consola negra
                     UseShellExecute = false,
                     WorkingDirectory = Path.GetDirectoryName(filePath),
                     WindowStyle = ProcessWindowStyle.Hidden
@@ -137,49 +142,12 @@ namespace NxDesk.Client
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error iniciando {filePath}: {ex.Message}");
+                MessageBox.Show($"Error iniciando proceso {Path.GetFileName(filePath)}: {ex.Message}");
                 return null;
             }
         }
 
-        /// <summary>
-        /// Busca el ejecutable. Primero intenta en el directorio local (Modo Release/Publish),
-        /// luego intenta buscar hacia atrás en la estructura de carpetas de Visual Studio (Modo Debug).
-        /// </summary>
-        private string FindExecutable(string fileName, string projectName)
-        {
-            string currentDir = AppDomain.CurrentDomain.BaseDirectory;
-
-            // 1. Buscar en la misma carpeta (Producción)
-            string localPath = Path.Combine(currentDir, fileName);
-            if (File.Exists(localPath)) return localPath;
-
-            // 2. Buscar en estructura de desarrollo (Debug)
-            // Sube 4 niveles desde Client/bin/Debug/net8.0-windows hasta la raiz de la solución
-            // Luego entra a ProjectName/bin/Debug/net8.0/FileName
-            try
-            {
-                DirectoryInfo? slnDir = new DirectoryInfo(currentDir).Parent?.Parent?.Parent?.Parent;
-                if (slnDir != null && slnDir.Exists)
-                {
-                    // Nota: El signaling server es net8.0 (sin windows), el host es net8.0-windows
-                    // Buscamos en ambas posibilidades
-                    string[] possibleSubPaths = {
-                        Path.Combine(projectName, "bin", "Debug", "net8.0", fileName),
-                        Path.Combine(projectName, "bin", "Debug", "net8.0-windows", fileName)
-                    };
-
-                    foreach (var subPath in possibleSubPaths)
-                    {
-                        string fullPath = Path.Combine(slnDir.FullName, subPath);
-                        if (File.Exists(fullPath)) return fullPath;
-                    }
-                }
-            }
-            catch { }
-
-            return string.Empty;
-        }
+        // Eliminamos el método complejo FindExecutable, ya no es necesario.
 
         protected override void OnExit(ExitEventArgs e)
         {

@@ -1,4 +1,5 @@
-﻿using System.Windows;
+﻿using System.Diagnostics;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using NxDesk.Client.ViewModels;
@@ -76,7 +77,26 @@ namespace NxDesk.Client
 
         private async void ConnectButton_Click(object sender, RoutedEventArgs e)
         {
-            await _viewModel.Connect(RoomIdTextBox.Text);
+            Debug.WriteLine("--------------------------------------------------");
+            Debug.WriteLine($"[UI] Botón Conectar presionado. Texto ID: '{RoomIdTextBox.Text}'");
+
+            if (string.IsNullOrWhiteSpace(RoomIdTextBox.Text))
+            {
+                Debug.WriteLine("[UI] Error: El ID está vacío.");
+                MessageBox.Show("Por favor ingresa un ID válido.");
+                return;
+            }
+
+            try
+            {
+                Debug.WriteLine("[UI] Llamando al ViewModel.Connect...");
+                await _viewModel.Connect(RoomIdTextBox.Text);
+                Debug.WriteLine("[UI] Retorno del ViewModel.Connect (Finalizado).");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[UI] EXCEPCIÓN CRÍTICA en botón: {ex.Message}");
+            }
         }
 
         private async void DisconnectButton_Click(object sender, RoutedEventArgs e)
