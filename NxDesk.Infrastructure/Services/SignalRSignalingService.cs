@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using NxDesk.Application.DTOs;
 using NxDesk.Application.Interfaces;
 using System.Diagnostics;
+using System.Net.Http;
 
 namespace NxDesk.Infrastructure.Services
 {
@@ -25,20 +26,15 @@ namespace NxDesk.Infrastructure.Services
             Debug.WriteLine($"[SignalR Config] URL final a usar: '{_serverUrl}'");
 
             _hubConnection = new HubConnectionBuilder()
-                .WithUrl(_serverUrl, options =>
-                {
-                    options.HttpMessageHandlerFactory = (handler) =>
-                    {
-                        if (handler is HttpClientHandler clientHandler)
-                        {
-                            clientHandler.ServerCertificateCustomValidationCallback =
-                                (sender, certificate, chain, sslPolicyErrors) => true;
-                        }
-                        return handler;
-                    };
-                })
-                .WithAutomaticReconnect()
-                .Build();
+                  .WithUrl(_serverUrl, options =>
+                  {
+                      options.HttpMessageHandlerFactory = _ => new HttpClientHandler
+                      {
+                          ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+                      };
+                  })
+                    .WithAutomaticReconnect()
+                    .Build();
 
             _hubConnection.On<SdpMessage>("ReceiveMessage", async (message) =>
             {

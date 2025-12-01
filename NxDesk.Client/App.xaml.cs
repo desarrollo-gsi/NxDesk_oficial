@@ -109,14 +109,9 @@ namespace NxDesk.Client
             try
             {
                 string processName = Path.GetFileNameWithoutExtension(filePath);
-                foreach (var oldProc in Process.GetProcessesByName(processName))
+                foreach (var p in Process.GetProcessesByName(processName))
                 {
-                    try
-                    {
-                        oldProc.Kill();
-                        Debug.WriteLine($"[Limpieza] Proceso zombie eliminado: {processName}");
-                    }
-                    catch { }
+                    try { p.Kill(); } catch { }
                 }
 
                 var startInfo = new ProcessStartInfo(filePath)
@@ -127,14 +122,7 @@ namespace NxDesk.Client
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
 
-                var process = Process.Start(startInfo);
-
-                if (process != null)
-                {
-                    ChildProcessTracker.AddProcess(process);
-                }
-
-                return process;
+                return Process.Start(startInfo);
             }
             catch (Exception ex)
             {

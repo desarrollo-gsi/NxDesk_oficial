@@ -31,14 +31,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Referencias a librerías de código -->
     <ProjectReference Include="..\NxDesk.Application\NxDesk.Application.csproj" />
     <ProjectReference Include="..\NxDesk.Infrastructure\NxDesk.Infrastructure.csproj" />
 
-    <!-- 
-       Referencias a los PROCESOS (Host y Server). 
-       ReferenceOutputAssembly=false es crucial aquí.
-    -->
     <ProjectReference Include="..\NxDesk.Host\NxDesk.Host.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
@@ -48,22 +43,14 @@
     </ProjectReference>
   </ItemGroup>
 
-  <!-- 
-    === CORRECCIÓN AQUÍ === 
-    Se actualizaron las rutas para usar comodines (*) en el nombre del framework.
-    Esto soluciona el problema de que el SignalingServer sea 'net8.0-windows' y no 'net8.0'.
-  -->
   <Target Name="CopyWorkerServices" AfterTargets="Build">
     <ItemGroup>
-      <!-- Busca en cualquier carpeta que empiece con net8.0 dentro de bin -->
       <HostFiles Include="..\NxDesk.Host\bin\$(Configuration)\net8.0*\**\*.*" />
       <ServerFiles Include="..\NxDesk.SignalingServer\bin\$(Configuration)\net8.0*\**\*.*" />
     </ItemGroup>
 
-    <!-- Copia Host -->
     <Copy SourceFiles="@(HostFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     
-    <!-- Copia Server -->
     <Copy SourceFiles="@(ServerFiles)" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
     
     <Message Text="[NxDesk] Servicios Host y Signaling copiados exitosamente a $(OutDir)" Importance="high" />
