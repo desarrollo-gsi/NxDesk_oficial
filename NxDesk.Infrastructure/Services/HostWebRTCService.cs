@@ -26,7 +26,6 @@ namespace NxDesk.Infrastructure.Services
         private int _currentScreenIndex = 0;
         private RTCDataChannel _dataChannel;
 
-        // Encoder de video VP8
         private readonly VpxVideoEncoder _vpxEncoder = new VpxVideoEncoder();
 
         public HostWebRTCService(ISignalingService signalingService, IInputSimulator inputSimulator)
@@ -59,7 +58,6 @@ namespace NxDesk.Infrastructure.Services
 
                     _peerConnection = new RTCPeerConnection(config);
 
-                    // Configuración idéntica al proyecto de referencia
                     var videoFormats = new List<VideoFormat> { new VideoFormat(VideoCodecsEnum.VP8, 96) };
                     var videoTrack = new MediaStreamTrack(videoFormats, MediaStreamStatusEnum.SendOnly);
                     _peerConnection.addTrack(videoTrack);
@@ -83,7 +81,6 @@ namespace NxDesk.Infrastructure.Services
                         }
                     };
 
-                    // Parseo de SDP robusto como en la referencia
                     var offerSdp = SDP.ParseSDPDescription(message.Payload);
                     var offerInit = new RTCSessionDescriptionInit
                     {
@@ -102,7 +99,6 @@ namespace NxDesk.Infrastructure.Services
                         Payload = answer.sdp
                     });
 
-                    // Iniciar captura
                     _isCapturing = true;
                     _ = Task.Run(CaptureLoop);
                 }
@@ -127,7 +123,6 @@ namespace NxDesk.Infrastructure.Services
 
             while (_isCapturing)
             {
-                // Control de estado de conexión
                 if (_peerConnection?.connectionState == RTCPeerConnectionState.closed ||
                     _peerConnection?.connectionState == RTCPeerConnectionState.failed)
                 {
@@ -135,7 +130,6 @@ namespace NxDesk.Infrastructure.Services
                     break;
                 }
 
-                // Esperar a conexión establecida
                 if (_peerConnection?.connectionState != RTCPeerConnectionState.connected)
                 {
                     await Task.Delay(100);
@@ -146,15 +140,12 @@ namespace NxDesk.Infrastructure.Services
 
                 try
                 {
-                    // 1. Captura con lógica de redimensionado del proyecto referencia
                     using (var bitmap = CaptureScreenRaw())
                     {
                         if (bitmap != null)
                         {
-                            // 2. Conversión segura de bytes
                             var rawBuffer = BitmapToBytes(bitmap);
 
-                            // 3. Codificación VP8
                             var encodedBuffer = _vpxEncoder.EncodeVideo(
                                 bitmap.Width,
                                 bitmap.Height,
@@ -162,8 +153,6 @@ namespace NxDesk.Infrastructure.Services
                                 VideoPixelFormatsEnum.Bgra,
                                 VideoCodecsEnum.VP8);
 
-                            // 4. ENVÍO: Usamos SendVideo en lugar de SendRtpRaw
-                            // Esto maneja la fragmentación de paquetes RTP automáticamente.
                             if (encodedBuffer != null && encodedBuffer.Length > 0)
                             {
                                 uint timestamp = (uint)(DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond);
@@ -177,14 +166,12 @@ namespace NxDesk.Infrastructure.Services
                     Log($"[Loop Error] {ex.Message}");
                 }
 
-                // Control de FPS (~20-30 FPS)
                 var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
                 var waitTime = 50 - (int)elapsed;
                 if (waitTime > 0) await Task.Delay(waitTime);
             }
         }
 
-        // Lógica de captura idéntica al proyecto 'NxDeskk'
         private Bitmap CaptureScreenRaw()
         {
             try
@@ -196,7 +183,6 @@ namespace NxDesk.Infrastructure.Services
                 int targetWidth = bounds.Width;
                 int targetHeight = bounds.Height;
 
-                // Redimensionar si es muy grande (lógica de referencia)
                 if (targetWidth > 1920)
                 {
                     float ratio = (float)bounds.Height / bounds.Width;
@@ -204,7 +190,6 @@ namespace NxDesk.Infrastructure.Services
                     targetHeight = (int)(targetWidth * ratio);
                 }
 
-                // Asegurar dimensiones pares para VP8 (Safety check extra)
                 if (targetWidth % 2 != 0) targetWidth--;
                 if (targetHeight % 2 != 0) targetHeight--;
 
@@ -216,14 +201,12 @@ namespace NxDesk.Infrastructure.Services
                     g.InterpolationMode = InterpolationMode.Bilinear;
                     g.PixelOffsetMode = PixelOffsetMode.HighSpeed;
 
-                    // Si no hay cambio de tamaño, copia directa rápida
                     if (targetWidth == bounds.Width && targetHeight == bounds.Height)
                     {
                         g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
                     }
                     else
                     {
-                        // Si hay cambio de tamaño, capturar y escalar
                         using (var fullScreenBmp = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb))
                         using (var gFull = Graphics.FromImage(fullScreenBmp))
                         {
@@ -241,7 +224,6 @@ namespace NxDesk.Infrastructure.Services
             }
         }
 
-        // Lógica de conversión de bytes del proyecto de referencia
         private byte[] BitmapToBytes(Bitmap bmp)
         {
             BitmapData bmpData = null;
@@ -254,8 +236,6 @@ namespace NxDesk.Infrastructure.Services
                 int size = widthInBytes * bmp.Height;
                 byte[] rgbValues = new byte[size];
 
-                // Copia línea a línea usando aritmética de punteros (IntPtr.Add)
-                // Esta es la forma más segura de manejar el Stride
                 for (int y = 0; y < bmp.Height; y++)
                 {
                     IntPtr rowPtr = IntPtr.Add(bmpData.Scan0, y * bmpData.Stride);

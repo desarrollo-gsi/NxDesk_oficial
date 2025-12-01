@@ -3,11 +3,11 @@ using NxDesk.Application.DTOs;
 using NxDesk.Application.Interfaces;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
-using SIPSorceryMedia.Encoders; 
+using SIPSorceryMedia.Encoders;
 using System.Diagnostics;
-using System.Net;
+using System.IO;
 using System.Text;
-using System.IO; 
+using System.Windows;
 
 namespace NxDesk.Infrastructure.Services
 {
@@ -39,35 +39,48 @@ namespace NxDesk.Infrastructure.Services
 
             var config = new RTCConfiguration
             {
-                iceServers = new List<RTCIceServer>
-                {
-                    new RTCIceServer { urls = "stun:stun.l.google.com:19302" }
-                }
+                iceServers = new List<RTCIceServer> { new() { urls = "stun:stun.l.google.com:19302" } }
             };
 
             _pc = new RTCPeerConnection(config);
 
-            // --- CORRECCIÓN FINAL ---
-            // En lugar de addTransceiver (que no existe en esta versión), usamos addTrack
-            // configurado explícitamente como "RecvOnly" (Solo Recibir).
-            
-            // 1. Definimos que aceptamos video VP8 (Payload 96)
             var videoFormats = new List<SDPAudioVideoMediaFormat>
             {
                 new SDPAudioVideoMediaFormat(new VideoFormat(VideoCodecsEnum.VP8, 96))
             };
-
-            // 2. Creamos un Track virtual que indica "Quiero recibir video"
-            var videoTrack = new MediaStreamTrack(
-                SDPMediaTypesEnum.video, 
-                false, 
-                videoFormats, 
-                MediaStreamStatusEnum.RecvOnly
-            );
-
-            // 3. Añadimos este track a la conexión
+            var videoTrack = new MediaStreamTrack(SDPMediaTypesEnum.video, false, videoFormats, MediaStreamStatusEnum.RecvOnly);
             _pc.addTrack(videoTrack);
-            // ------------------------
+
+            _pc.OnVideoFrameReceived += (endpoint, timestamp, frame, format) =>
+            {
+                try
+                {
+                    // 1. Decodificar VP8 a Píxeles Crudos
+                    // Solicitamos Bgra, pero debemos verificar qué nos devuelve realmente por el tamaño
+                    var rawSamples = _vpxDecoder.DecodeVideo(frame, VideoPixelFormatsEnum.Bgra, VideoCodecsEnum.VP8);
+
+                    if (rawSamples != null)
+                    {
+                        foreach (var sample in rawSamples)
+                        {
+                            // 2. Crear BMP válido dinámicamente
+                            var bmpBytes = CreateBitmapFromPixels(sample.Sample, (int)sample.Width, (int)sample.Height);
+
+                            if (bmpBytes != null)
+                            {
+                                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                                {
+                                    OnVideoFrameReceived?.Invoke(bmpBytes);
+                                });
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[CLIENT DECODE ERROR] {ex.Message}");
+                }
+            };
 
             _pc.onconnectionstatechange += state =>
             {
@@ -75,40 +88,6 @@ namespace NxDesk.Infrastructure.Services
                 {
                     OnConnectionStateChanged?.Invoke(state.ToString());
                 });
-            };
-
-            _pc.OnRtpPacketReceived += (IPEndPoint remoteEndPoint, SDPMediaTypesEnum mediaType, RTPPacket rtpPacket) =>
-            {
-                if (mediaType == SDPMediaTypesEnum.video && rtpPacket.Header.PayloadType == 96)
-                {
-                    // Log para confirmar recepción
-                    Debug.WriteLine($"[RTP] Frame recibido: {rtpPacket.Payload.Length} bytes");
-
-                    try 
-                    {
-                        var rawFrames = _vpxDecoder.DecodeVideo(rtpPacket.Payload, VideoPixelFormatsEnum.Bgra, VideoCodecsEnum.VP8);
-
-                        if (rawFrames != null)
-                        {
-                            foreach (var sampleObj in rawFrames)
-                            {
-                                var bmpBytes = CreateBitmapFromPixels(sampleObj.Sample, (int)sampleObj.Width, (int)sampleObj.Height);
-                                
-                                if (bmpBytes != null)
-                                {
-                                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                                    {
-                                        OnVideoFrameReceived?.Invoke(bmpBytes);
-                                    });
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex) 
-                    {
-                        Debug.WriteLine($"[Client Decode Error] {ex.Message}");
-                    }
-                }
             };
 
             _pc.onicecandidate += async candidate =>
@@ -130,9 +109,9 @@ namespace NxDesk.Infrastructure.Services
                 _dataChannel.onopen += () => RequestScreenList();
                 _dataChannel.onmessage += (_, _, data) =>
                 {
-                    var json = Encoding.UTF8.GetString(data);
                     try
                     {
+                        var json = Encoding.UTF8.GetString(data);
                         var msg = JsonConvert.DeserializeObject<DataChannelMessage>(json);
                         if (msg?.Type == "system:screen_info")
                         {
@@ -156,30 +135,51 @@ namespace NxDesk.Infrastructure.Services
             return true;
         }
 
+        // MÉTODO CORREGIDO Y BLINDADO
         private byte[] CreateBitmapFromPixels(byte[] pixels, int width, int height)
         {
-            if (pixels == null || pixels.Length == 0) return null;
-            if (width <= 0 || height <= 0) { width = 1920; height = 1080; }
+            if (pixels == null || pixels.Length == 0 || width <= 0 || height <= 0) return null;
+
+            // Calcular profundidad de color real basada en el tamaño del buffer
+            // Si pixels.Length == width * height * 3 -> es 24 bits (RGB)
+            // Si pixels.Length == width * height * 4 -> es 32 bits (BGRA)
+            int bytesPerPixel = pixels.Length / (width * height);
+            short bitsPerPixel = (short)(bytesPerPixel * 8);
+
+            // Validar que sea un formato soportado (24 o 32 bits)
+            if (bitsPerPixel != 24 && bitsPerPixel != 32)
+            {
+                Debug.WriteLine($"[BMP ERROR] Formato de píxel extraño: {bitsPerPixel} bits/pixel. W={width}, H={height}, Len={pixels.Length}");
+                // Intento de recuperación: asumir 32 bits y que sobra/falta algo, o retornar null
+                // return null; // Descomentar si prefieres no mostrar nada a mostrar basura
+                bitsPerPixel = 32; // Fallback a lo estándar
+            }
 
             using (var stream = new MemoryStream())
             {
                 using (var writer = new BinaryWriter(stream))
                 {
-                    writer.Write(new char[] { 'B', 'M' });
-                    writer.Write(54 + pixels.Length);
-                    writer.Write(0);
-                    writer.Write(54);
-                    writer.Write(40);
+                    // 1. File Header (14 bytes)
+                    writer.Write((byte)0x42); // 'B'
+                    writer.Write((byte)0x4D); // 'M'
+                    writer.Write(54 + pixels.Length); // File Size
+                    writer.Write(0); // Reserved
+                    writer.Write(54); // Offset to pixel data
+
+                    // 2. Info Header (40 bytes)
+                    writer.Write(40); // Header Size
                     writer.Write(width);
-                    writer.Write(-height); 
-                    writer.Write((short)1);
-                    writer.Write((short)32);
-                    writer.Write(0);
-                    writer.Write(pixels.Length);
-                    writer.Write(0);
-                    writer.Write(0);
+                    writer.Write(-height); // Top-down
+                    writer.Write((short)1); // Planes
+                    writer.Write(bitsPerPixel); // Bits per pixel (Calculado dinámicamente)
+                    writer.Write(0); // Compression
+                    writer.Write(pixels.Length); // Image Size
                     writer.Write(0);
                     writer.Write(0);
+                    writer.Write(0);
+                    writer.Write(0);
+
+                    // 3. Pixel Data
                     writer.Write(pixels);
                 }
                 return stream.ToArray();
