@@ -17,7 +17,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<ProjectReference Include="..\NxDesk.Domain\NxDesk.Domain.csproj" />
+		<ProjectReference Include="..\Domain\NxDesk.Domain.csproj" />
 		<ProjectReference Include="..\NxDesk.Application\NxDesk.Application.csproj" />
 	</ItemGroup>
 </Project>

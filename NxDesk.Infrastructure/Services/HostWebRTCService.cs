@@ -8,7 +8,7 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
-using System.IO; // <--- SOLUCIÓN ERROR: Path y File
+using System.IO;
 
 namespace NxDesk.Infrastructure.Services
 {
@@ -21,6 +21,8 @@ namespace NxDesk.Infrastructure.Services
         private int _currentScreenIndex = 0;
         private RTCDataChannel _dataChannel;
         private uint _timestamp = 0;
+
+        // ELIMINADO: private RTCRtpSender _videoSender; // No es necesario
 
         public HostWebRTCService(ISignalingService signalingService, IInputSimulator inputSimulator)
         {
@@ -54,6 +56,8 @@ namespace NxDesk.Infrastructure.Services
                 };
 
                 var videoTrack = new MediaStreamTrack(SDPMediaTypesEnum.video, false, videoFormats, MediaStreamStatusEnum.SendOnly);
+
+                // CORREGIDO: No asignamos el resultado, solo añadimos el track.
                 _peerConnection.addTrack(videoTrack);
 
                 _peerConnection.ondatachannel += (dc) =>
@@ -123,15 +127,12 @@ namespace NxDesk.Infrastructure.Services
 
                     var buffer = BitmapToBytes(bitmap);
 
-                    // --- SOLUCIÓN ERROR 2: GetRtpSender no existe ---
-                    // Usamos GetSenders() y filtramos por el tipo de medio.
-                    var senders = _peerConnection.GetSenders();
-                    var videoSender = senders.FirstOrDefault(s => s.Track?.Kind == SDPMediaTypesEnum.video);
-
-                    if (videoSender != null)
+                    // CORREGIDO: Enviamos usando _peerConnection directamente
+                    // SendRtpRaw(tipoMedio, buffer, timestamp, marker, payloadType)
+                    if (_peerConnection != null)
                     {
-                        _timestamp += 3600;
-                        videoSender.SendRtp(buffer, _timestamp, 1, 96);
+                        _timestamp += 3600; // Aprox 90000Hz / 25fps
+                        _peerConnection.SendRtpRaw(SDPMediaTypesEnum.video, buffer, _timestamp, 1, 96);
                     }
                 }
                 catch (Exception ex)
@@ -213,8 +214,6 @@ namespace NxDesk.Infrastructure.Services
 
         private void SendScreenList()
         {
-            // --- SOLUCIÓN ERROR 3: Comparación de Enum ---
-            // readyState es un Enum RTCDataChannelState, no un string
             if (_dataChannel?.readyState != RTCDataChannelState.open) return;
 
             var names = Screen.AllScreens.Select((s, i) => $"Pantalla {i + 1}").ToList();
@@ -227,7 +226,6 @@ namespace NxDesk.Infrastructure.Services
         {
             try
             {
-                // Requiere using System.IO;
                 var path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "host_debug.log");
                 File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
             }
