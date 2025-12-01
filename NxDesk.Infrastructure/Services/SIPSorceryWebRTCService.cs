@@ -2,11 +2,8 @@
 using NxDesk.Application.DTOs;
 using NxDesk.Application.Interfaces;
 using SIPSorcery.Net;
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace NxDesk.Infrastructure.Services
 {
@@ -40,7 +37,6 @@ namespace NxDesk.Infrastructure.Services
             }
             OnConnectionStateChanged?.Invoke("Conectado. Iniciando WebRTC...");
 
-            // --- MEJORA: Lista de servidores STUN más robusta ---
             var config = new RTCConfiguration
             {
                 iceServers = new List<RTCIceServer>
@@ -55,7 +51,6 @@ namespace NxDesk.Infrastructure.Services
 
             _peerConnection.onicecandidate += async (candidate) =>
             {
-                // Solo enviar candidatos válidos
                 if (candidate != null && !string.IsNullOrWhiteSpace(candidate.candidate))
                 {
                     var msg = new SdpMessage
@@ -72,7 +67,6 @@ namespace NxDesk.Infrastructure.Services
             {
                 Debug.WriteLine($"[WebRTC State] {state}");
 
-                // Mapear estados a mensajes amigables
                 string statusMsg = state switch
                 {
                     RTCPeerConnectionState.connected => "Conexión establecida. Recibiendo video...",

@@ -6,7 +6,6 @@ using NxDesk.Client.Views.WelcomeView.ViewModel;
 using NxDesk.Infrastructure.Services;
 using System.Diagnostics;
 using System.IO;
-using System.Threading;
 using System.Windows;
 
 namespace NxDesk.Client
@@ -16,17 +15,14 @@ namespace NxDesk.Client
         public IServiceProvider Services { get; private set; }
         public IConfiguration Configuration { get; private set; }
 
-        // Mutex para instancia única
         private static Mutex? _mutex = null;
         private const string AppName = "Global\\NxDesk.Client.UniqueKey";
 
-        // Referencias a los procesos hijos para cerrarlos al salir
         private Process? _signalingProcess;
         private Process? _hostProcess;
 
         protected override void OnStartup(StartupEventArgs e)
         {
-            // --- 1. LÓGICA DE INSTANCIA ÚNICA (SINGLE INSTANCE) ---
             bool createdNew;
             _mutex = new Mutex(true, AppName, out createdNew);
 
@@ -37,7 +33,6 @@ namespace NxDesk.Client
                 return;
             }
 
-            // --- 2. ORQUESTACIÓN DE PROCESOS (Arrancar Server y Host) ---
             try
             {
                 StartSignalingServer();
@@ -48,7 +43,6 @@ namespace NxDesk.Client
                 MessageBox.Show($"Error crítico al iniciar servicios en segundo plano:\n{ex.Message}", "Error de Inicio", MessageBoxButton.OK, MessageBoxImage.Error);
             }
 
-            // --- 3. CONFIGURACIÓN (Appsettings y DI) ---
             var builder = new ConfigurationBuilder()
                 .SetBasePath(Directory.GetCurrentDirectory())
                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
@@ -60,7 +54,6 @@ namespace NxDesk.Client
 
             Services = serviceCollection.BuildServiceProvider();
 
-            // --- 4. ARRANQUE DE UI ---
             base.OnStartup(e);
 
             var mainWindow = Services.GetRequiredService<MainWindow>();
@@ -70,32 +63,24 @@ namespace NxDesk.Client
         private void ConfigureServices(IServiceCollection services)
         {
             services.AddSingleton(Configuration);
-
-            // Infraestructura
             services.AddSingleton<ISignalingService, SignalRSignalingService>();
             services.AddSingleton<IWebRTCService, SIPSorceryWebRTCService>();
             services.AddSingleton<IIdentityService, IdentityService>();
             services.AddSingleton<INetworkDiscoveryService, NetworkDiscoveryService>();
 
-            // ViewModels
             services.AddSingleton<MainViewModel>();
             services.AddSingleton<WelcomeViewModel>();
 
-            // Ventanas
             services.AddSingleton<MainWindow>();
         }
 
-        // --- MÉTODOS DE GESTIÓN DE PROCESOS ---
-
         private void StartSignalingServer()
         {
-            // Gracias al cambio en el .csproj, el archivo DEBE estar en la misma carpeta base
             string fileName = "NxDesk.SignalingServer.exe";
             string serverPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, fileName);
 
             if (!File.Exists(serverPath))
             {
-                // AVISO IMPORTANTE: Si ves este error, haz "Rebuild Solution" para que el script del csproj copie los archivos.
                 MessageBox.Show($"No se encontró el archivo: {fileName}\nUbicación buscada: {serverPath}\n\nIntenta recompilar la solución.",
                                 "Falta Componente", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
@@ -123,22 +108,33 @@ namespace NxDesk.Client
         {
             try
             {
-                // Matar procesos previos si quedaron colgados (opcional, útil en desarrollo)
                 string processName = Path.GetFileNameWithoutExtension(filePath);
-                foreach (var p in Process.GetProcessesByName(processName))
+                foreach (var oldProc in Process.GetProcessesByName(processName))
                 {
-                    try { p.Kill(); } catch { }
+                    try
+                    {
+                        oldProc.Kill();
+                        Debug.WriteLine($"[Limpieza] Proceso zombie eliminado: {processName}");
+                    }
+                    catch { }
                 }
 
                 var startInfo = new ProcessStartInfo(filePath)
                 {
-                    CreateNoWindow = true,        // No mostrar consola negra
+                    CreateNoWindow = true,
                     UseShellExecute = false,
                     WorkingDirectory = Path.GetDirectoryName(filePath),
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
 
-                return Process.Start(startInfo);
+                var process = Process.Start(startInfo);
+
+                if (process != null)
+                {
+                    ChildProcessTracker.AddProcess(process);
+                }
+
+                return process;
             }
             catch (Exception ex)
             {
@@ -147,13 +143,10 @@ namespace NxDesk.Client
             }
         }
 
-        // Eliminamos el método complejo FindExecutable, ya no es necesario.
-
         protected override void OnExit(ExitEventArgs e)
         {
             try
             {
-                // Cerrar procesos hijos al salir del Cliente
                 if (_signalingProcess != null && !_signalingProcess.HasExited)
                 {
                     _signalingProcess.Kill();
@@ -166,7 +159,6 @@ namespace NxDesk.Client
                     _hostProcess.Dispose();
                 }
 
-                // Liberar Mutex
                 if (_mutex != null)
                 {
                     _mutex.ReleaseMutex();

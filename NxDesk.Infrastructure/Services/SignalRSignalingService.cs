@@ -16,13 +16,10 @@ namespace NxDesk.Infrastructure.Services
 
         public SignalRSignalingService(IConfiguration configuration)
         {
-            // LEER URL: Asegúrate de que en appsettings.json la clave sea "SignalR:ServerUrl"
             string configUrl = configuration["SignalR:ServerUrl"];
 
-            // LOG CRÍTICO: Ver qué URL se leyó
             Debug.WriteLine($"[SignalR Config] URL leída de appsettings: '{configUrl}'");
 
-            // Si es nula, usar fallback (pero esto indica que appsettings falló)
             _serverUrl = !string.IsNullOrEmpty(configUrl) ? configUrl : "http://localhost:5000/signalinghub";
 
             Debug.WriteLine($"[SignalR Config] URL final a usar: '{_serverUrl}'");
@@ -54,6 +51,7 @@ namespace NxDesk.Infrastructure.Services
 
         public string? GetConnectionId() => _hubConnection?.ConnectionId;
 
+
         public async Task<bool> ConnectAsync(string roomId)
         {
             _roomId = roomId;
@@ -79,9 +77,7 @@ namespace NxDesk.Infrastructure.Services
                 }
                 return false;
             }
-        }
-
-        public async Task RelayMessageAsync(SdpMessage message)
+        }        public async Task RelayMessageAsync(SdpMessage message)
         {
             if (_hubConnection.State == HubConnectionState.Connected)
             {

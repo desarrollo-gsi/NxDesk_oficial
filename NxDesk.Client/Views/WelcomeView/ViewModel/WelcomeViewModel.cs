@@ -3,7 +3,6 @@ using NxDesk.Domain.Entities;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Windows.Threading; // Para Dispatcher
 using System.Diagnostics;
 
 namespace NxDesk.Client.Views.WelcomeView.ViewModel
@@ -13,7 +12,6 @@ namespace NxDesk.Client.Views.WelcomeView.ViewModel
         public event Action<DiscoveredDevice> OnDeviceSelected;
         public event PropertyChangedEventHandler PropertyChanged;
 
-        // Servicios inyectados
         private readonly INetworkDiscoveryService _discoveryService;
         private readonly IIdentityService _identityService;
 
@@ -26,7 +24,6 @@ namespace NxDesk.Client.Views.WelcomeView.ViewModel
             set { _discoveredDevices = value; OnPropertyChanged(); }
         }
 
-        // Constructor con Inyección de Dependencias
         public WelcomeViewModel(INetworkDiscoveryService discoveryService, IIdentityService identityService)
         {
             _discoveryService = discoveryService;
@@ -45,7 +42,6 @@ namespace NxDesk.Client.Views.WelcomeView.ViewModel
 
         private void HandleDeviceDiscovered(DiscoveredDevice device)
         {
-            // CORRECCIÓN PRINCIPAL: Usar System.Windows.Application explícitamente
             System.Windows.Application.Current.Dispatcher.Invoke(() =>
             {
                 bool exists = false;

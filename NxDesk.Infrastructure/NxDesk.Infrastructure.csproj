@@ -14,10 +14,6 @@
 		<PackageReference Include="SIPSorcery" Version="8.0.0" />
 		<PackageReference Include="SIPSorceryMedia.Encoders" Version="8.0.7" />
 
-		<!-- 
-      FIX: Forzamos la versión 8.0.5 para evitar que el entorno de compilación
-      introduzca referencias a la versión 10.0.0.0 de System.Text.Json
-    -->
 		<PackageReference Include="System.Text.Json" Version="8.0.5" />
 	</ItemGroup>
 
