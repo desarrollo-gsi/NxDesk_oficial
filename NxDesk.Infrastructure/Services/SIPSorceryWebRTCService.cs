@@ -3,12 +3,11 @@ using NxDesk.Application.DTOs;
 using NxDesk.Application.Interfaces;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
+using SIPSorceryMedia.Encoders; 
 using System.Diagnostics;
 using System.Net;
 using System.Text;
-using System.Windows;
-using System.Windows.Media;
-// using System.Windows.Media.Imaging; // Ya no es necesario aquí si pasamos bytes
+using System.IO; 
 
 namespace NxDesk.Infrastructure.Services
 {
@@ -17,12 +16,10 @@ namespace NxDesk.Infrastructure.Services
         private readonly ISignalingService _signalingService;
         private RTCPeerConnection _pc;
         private RTCDataChannel _dataChannel;
+        private readonly VpxVideoEncoder _vpxDecoder = new VpxVideoEncoder();
 
         public event Action<string> OnConnectionStateChanged;
-
-        // CORRECCIÓN 1: Ajustado a byte[] para coincidir con tu interfaz IWebRTCService
         public event Action<byte[]> OnVideoFrameReceived;
-
         public event Action<List<string>> OnScreensInfoReceived;
 
         public SIPSorceryWebRTCService(ISignalingService signalingService)
@@ -50,9 +47,30 @@ namespace NxDesk.Infrastructure.Services
 
             _pc = new RTCPeerConnection(config);
 
+            // --- CORRECCIÓN FINAL ---
+            // En lugar de addTransceiver (que no existe en esta versión), usamos addTrack
+            // configurado explícitamente como "RecvOnly" (Solo Recibir).
+            
+            // 1. Definimos que aceptamos video VP8 (Payload 96)
+            var videoFormats = new List<SDPAudioVideoMediaFormat>
+            {
+                new SDPAudioVideoMediaFormat(new VideoFormat(VideoCodecsEnum.VP8, 96))
+            };
+
+            // 2. Creamos un Track virtual que indica "Quiero recibir video"
+            var videoTrack = new MediaStreamTrack(
+                SDPMediaTypesEnum.video, 
+                false, 
+                videoFormats, 
+                MediaStreamStatusEnum.RecvOnly
+            );
+
+            // 3. Añadimos este track a la conexión
+            _pc.addTrack(videoTrack);
+            // ------------------------
+
             _pc.onconnectionstatechange += state =>
             {
-                // CORRECCIÓN 2: Uso explícito de System.Windows.Application para evitar conflicto de nombres
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
                     OnConnectionStateChanged?.Invoke(state.ToString());
@@ -63,14 +81,33 @@ namespace NxDesk.Infrastructure.Services
             {
                 if (mediaType == SDPMediaTypesEnum.video && rtpPacket.Header.PayloadType == 96)
                 {
-                    var frameData = rtpPacket.Payload;
+                    // Log para confirmar recepción
+                    Debug.WriteLine($"[RTP] Frame recibido: {rtpPacket.Payload.Length} bytes");
 
-                    // CORRECCIÓN 3: Enviamos los bytes crudos directamente.
-                    // La conversión a BitmapSource debe hacerse en el ViewModel (Capa de Presentación).
-                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                    try 
                     {
-                        OnVideoFrameReceived?.Invoke(frameData);
-                    });
+                        var rawFrames = _vpxDecoder.DecodeVideo(rtpPacket.Payload, VideoPixelFormatsEnum.Bgra, VideoCodecsEnum.VP8);
+
+                        if (rawFrames != null)
+                        {
+                            foreach (var sampleObj in rawFrames)
+                            {
+                                var bmpBytes = CreateBitmapFromPixels(sampleObj.Sample, (int)sampleObj.Width, (int)sampleObj.Height);
+                                
+                                if (bmpBytes != null)
+                                {
+                                    System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                                    {
+                                        OnVideoFrameReceived?.Invoke(bmpBytes);
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex) 
+                    {
+                        Debug.WriteLine($"[Client Decode Error] {ex.Message}");
+                    }
                 }
             };
 
@@ -117,6 +154,36 @@ namespace NxDesk.Infrastructure.Services
             });
 
             return true;
+        }
+
+        private byte[] CreateBitmapFromPixels(byte[] pixels, int width, int height)
+        {
+            if (pixels == null || pixels.Length == 0) return null;
+            if (width <= 0 || height <= 0) { width = 1920; height = 1080; }
+
+            using (var stream = new MemoryStream())
+            {
+                using (var writer = new BinaryWriter(stream))
+                {
+                    writer.Write(new char[] { 'B', 'M' });
+                    writer.Write(54 + pixels.Length);
+                    writer.Write(0);
+                    writer.Write(54);
+                    writer.Write(40);
+                    writer.Write(width);
+                    writer.Write(-height); 
+                    writer.Write((short)1);
+                    writer.Write((short)32);
+                    writer.Write(0);
+                    writer.Write(pixels.Length);
+                    writer.Write(0);
+                    writer.Write(0);
+                    writer.Write(0);
+                    writer.Write(0);
+                    writer.Write(pixels);
+                }
+                return stream.ToArray();
+            }
         }
 
         public void RequestScreenList()

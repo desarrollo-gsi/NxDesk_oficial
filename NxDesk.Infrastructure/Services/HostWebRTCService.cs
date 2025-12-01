@@ -3,7 +3,9 @@ using NxDesk.Application.DTOs;
 using NxDesk.Application.Interfaces;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
+using SIPSorceryMedia.Encoders;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -14,18 +16,23 @@ namespace NxDesk.Infrastructure.Services
 {
     public class HostWebRTCService
     {
+        [DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+
         private readonly ISignalingService _signalingService;
         private readonly IInputSimulator _inputSimulator;
         private RTCPeerConnection _peerConnection;
         private bool _isCapturing;
         private int _currentScreenIndex = 0;
         private RTCDataChannel _dataChannel;
-        private uint _timestamp = 0;
 
-        // ELIMINADO: private RTCRtpSender _videoSender; // No es necesario
+        // Encoder de video VP8
+        private readonly VpxVideoEncoder _vpxEncoder = new VpxVideoEncoder();
 
         public HostWebRTCService(ISignalingService signalingService, IInputSimulator inputSimulator)
         {
+            try { SetProcessDPIAware(); } catch { }
+
             _signalingService = signalingService;
             _inputSimulator = inputSimulator;
             _signalingService.OnMessageReceived += HandleSignalingMessage;
@@ -39,139 +46,227 @@ namespace NxDesk.Infrastructure.Services
 
         private async Task HandleSignalingMessage(SdpMessage message)
         {
-            if (message.Type == "offer")
+            try
             {
-                Log("[Host] Oferta recibida. Creando respuesta...");
-                var config = new RTCConfiguration
+                if (message.Type == "offer")
                 {
-                    iceServers = new List<RTCIceServer> { new() { urls = "stun:stun.l.google.com:19302" } }
-                };
+                    Log("[Host] Oferta recibida. Configurando conexión...");
 
-                _peerConnection = new RTCPeerConnection(config);
-
-                var videoFormats = new List<SDPAudioVideoMediaFormat>
-                {
-                    new SDPAudioVideoMediaFormat(new VideoFormat(VideoCodecsEnum.VP8, 96)),
-                    new SDPAudioVideoMediaFormat(new VideoFormat(VideoCodecsEnum.H264, 107))
-                };
-
-                var videoTrack = new MediaStreamTrack(SDPMediaTypesEnum.video, false, videoFormats, MediaStreamStatusEnum.SendOnly);
-
-                // CORREGIDO: No asignamos el resultado, solo añadimos el track.
-                _peerConnection.addTrack(videoTrack);
-
-                _peerConnection.ondatachannel += (dc) =>
-                {
-                    _dataChannel = dc;
-                    dc.onopen += SendScreenList;
-                    dc.onmessage += (channel, protocol, data) => HandleInputData(data);
-                };
-
-                _peerConnection.onicecandidate += async (candidate) =>
-                {
-                    if (candidate?.candidate != null)
+                    var config = new RTCConfiguration
                     {
-                        await _signalingService.RelayMessageAsync(new SdpMessage
+                        iceServers = new List<RTCIceServer> { new() { urls = "stun:stun.l.google.com:19302" } }
+                    };
+
+                    _peerConnection = new RTCPeerConnection(config);
+
+                    // Configuración idéntica al proyecto de referencia
+                    var videoFormats = new List<VideoFormat> { new VideoFormat(VideoCodecsEnum.VP8, 96) };
+                    var videoTrack = new MediaStreamTrack(videoFormats, MediaStreamStatusEnum.SendOnly);
+                    _peerConnection.addTrack(videoTrack);
+
+                    _peerConnection.ondatachannel += (dc) =>
+                    {
+                        _dataChannel = dc;
+                        dc.onopen += SendScreenList;
+                        dc.onmessage += (channel, protocol, data) => HandleInputData(data);
+                    };
+
+                    _peerConnection.onicecandidate += async (candidate) =>
+                    {
+                        if (candidate?.candidate != null)
                         {
-                            Type = "ice-candidate",
-                            Payload = candidate.ToString()
-                        });
+                            await _signalingService.RelayMessageAsync(new SdpMessage
+                            {
+                                Type = "ice-candidate",
+                                Payload = JsonConvert.SerializeObject(candidate)
+                            });
+                        }
+                    };
+
+                    // Parseo de SDP robusto como en la referencia
+                    var offerSdp = SDP.ParseSDPDescription(message.Payload);
+                    var offerInit = new RTCSessionDescriptionInit
+                    {
+                        type = RTCSdpType.offer,
+                        sdp = offerSdp.ToString()
+                    };
+
+                    _peerConnection.setRemoteDescription(offerInit);
+
+                    var answer = _peerConnection.createAnswer(null);
+                    await _peerConnection.setLocalDescription(answer);
+
+                    await _signalingService.RelayMessageAsync(new SdpMessage
+                    {
+                        Type = "answer",
+                        Payload = answer.sdp
+                    });
+
+                    // Iniciar captura
+                    _isCapturing = true;
+                    _ = Task.Run(CaptureLoop);
+                }
+                else if (message.Type == "ice-candidate")
+                {
+                    var candidateInit = JsonConvert.DeserializeObject<RTCIceCandidateInit>(message.Payload);
+                    if (candidateInit != null)
+                    {
+                        _peerConnection?.addIceCandidate(candidateInit);
                     }
-                };
-
-                var offerInit = new RTCSessionDescriptionInit
-                {
-                    type = RTCSdpType.offer,
-                    sdp = message.Payload
-                };
-
-                var setResult = _peerConnection.setRemoteDescription(offerInit);
-
-                if (setResult != SetDescriptionResultEnum.OK)
-                {
-                    Log($"[ERROR] setRemoteDescription falló: {setResult}");
-                    return;
                 }
-
-                var answer = _peerConnection.createAnswer(null);
-                _peerConnection.setLocalDescription(answer);
-
-                await _signalingService.RelayMessageAsync(new SdpMessage
-                {
-                    Type = "answer",
-                    Payload = answer.sdp
-                });
-
-                _isCapturing = true;
-                _ = Task.Run(CaptureLoop);
             }
-            else if (message.Type == "ice-candidate")
+            catch (Exception ex)
             {
-                var candidateInit = JsonConvert.DeserializeObject<RTCIceCandidateInit>(message.Payload);
-                if (candidateInit != null)
-                {
-                    _peerConnection?.addIceCandidate(candidateInit);
-                }
+                Log($"[Signaling Error] {ex.Message}");
             }
         }
 
         private async Task CaptureLoop()
         {
-            Log("[Host] Transmisión iniciada.");
-            while (_isCapturing && _peerConnection?.connectionState == RTCPeerConnectionState.connected)
+            Log("[Host] Bucle de captura iniciado (Modo Referencia).");
+
+            while (_isCapturing)
             {
+                // Control de estado de conexión
+                if (_peerConnection?.connectionState == RTCPeerConnectionState.closed ||
+                    _peerConnection?.connectionState == RTCPeerConnectionState.failed)
+                {
+                    Log("[Host] Conexión finalizada.");
+                    break;
+                }
+
+                // Esperar a conexión establecida
+                if (_peerConnection?.connectionState != RTCPeerConnectionState.connected)
+                {
+                    await Task.Delay(100);
+                    continue;
+                }
+
+                var startTime = DateTime.Now;
+
                 try
                 {
-                    using var bitmap = CaptureScreen();
-                    if (bitmap == null) continue;
-
-                    var buffer = BitmapToBytes(bitmap);
-
-                    // CORREGIDO: Enviamos usando _peerConnection directamente
-                    // SendRtpRaw(tipoMedio, buffer, timestamp, marker, payloadType)
-                    if (_peerConnection != null)
+                    // 1. Captura con lógica de redimensionado del proyecto referencia
+                    using (var bitmap = CaptureScreenRaw())
                     {
-                        _timestamp += 3600; // Aprox 90000Hz / 25fps
-                        _peerConnection.SendRtpRaw(SDPMediaTypesEnum.video, buffer, _timestamp, 1, 96);
+                        if (bitmap != null)
+                        {
+                            // 2. Conversión segura de bytes
+                            var rawBuffer = BitmapToBytes(bitmap);
+
+                            // 3. Codificación VP8
+                            var encodedBuffer = _vpxEncoder.EncodeVideo(
+                                bitmap.Width,
+                                bitmap.Height,
+                                rawBuffer,
+                                VideoPixelFormatsEnum.Bgra,
+                                VideoCodecsEnum.VP8);
+
+                            // 4. ENVÍO: Usamos SendVideo en lugar de SendRtpRaw
+                            // Esto maneja la fragmentación de paquetes RTP automáticamente.
+                            if (encodedBuffer != null && encodedBuffer.Length > 0)
+                            {
+                                uint timestamp = (uint)(DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond);
+                                _peerConnection.SendVideo(timestamp, encodedBuffer);
+                            }
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log($"[VIDEO ERROR] {ex.Message}");
+                    Log($"[Loop Error] {ex.Message}");
                 }
-                await Task.Delay(40);
+
+                // Control de FPS (~20-30 FPS)
+                var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
+                var waitTime = 50 - (int)elapsed;
+                if (waitTime > 0) await Task.Delay(waitTime);
             }
-            Log("[Host] Captura detenida.");
         }
 
-        private Bitmap CaptureScreen()
+        // Lógica de captura idéntica al proyecto 'NxDeskk'
+        private Bitmap CaptureScreenRaw()
         {
-            var screens = Screen.AllScreens;
-            var screen = _currentScreenIndex < screens.Length ? screens[_currentScreenIndex] : screens[0];
-            var bounds = screen.Bounds;
-            int w = Math.Min(bounds.Width, 1920);
-            int h = Math.Min(bounds.Height, 1080);
-
-            var bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
-            using var g = Graphics.FromImage(bmp);
-            g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bmp.Size, CopyPixelOperation.SourceCopy);
-            return bmp;
-        }
-
-        private byte[] BitmapToBytes(Bitmap bmp)
-        {
-            var rect = new Rectangle(0, 0, bmp.Width, bmp.Height);
-            var data = bmp.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
             try
             {
-                int size = Math.Abs(data.Stride) * bmp.Height;
-                var buffer = new byte[size];
-                Marshal.Copy(data.Scan0, buffer, 0, size);
-                return buffer;
+                var screens = Screen.AllScreens;
+                if (_currentScreenIndex >= screens.Length) _currentScreenIndex = 0;
+
+                var bounds = screens[_currentScreenIndex].Bounds;
+                int targetWidth = bounds.Width;
+                int targetHeight = bounds.Height;
+
+                // Redimensionar si es muy grande (lógica de referencia)
+                if (targetWidth > 1920)
+                {
+                    float ratio = (float)bounds.Height / bounds.Width;
+                    targetWidth = 1920;
+                    targetHeight = (int)(targetWidth * ratio);
+                }
+
+                // Asegurar dimensiones pares para VP8 (Safety check extra)
+                if (targetWidth % 2 != 0) targetWidth--;
+                if (targetHeight % 2 != 0) targetHeight--;
+
+                var finalBitmap = new Bitmap(targetWidth, targetHeight, PixelFormat.Format32bppArgb);
+
+                using (var g = Graphics.FromImage(finalBitmap))
+                {
+                    g.CompositingMode = CompositingMode.SourceCopy;
+                    g.InterpolationMode = InterpolationMode.Bilinear;
+                    g.PixelOffsetMode = PixelOffsetMode.HighSpeed;
+
+                    // Si no hay cambio de tamaño, copia directa rápida
+                    if (targetWidth == bounds.Width && targetHeight == bounds.Height)
+                    {
+                        g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
+                    }
+                    else
+                    {
+                        // Si hay cambio de tamaño, capturar y escalar
+                        using (var fullScreenBmp = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb))
+                        using (var gFull = Graphics.FromImage(fullScreenBmp))
+                        {
+                            gFull.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
+                            g.DrawImage(fullScreenBmp, 0, 0, targetWidth, targetHeight);
+                        }
+                    }
+                }
+                return finalBitmap;
+            }
+            catch (Exception ex)
+            {
+                Log($"[CaptureScreenRaw Error] {ex.Message}");
+                return null;
+            }
+        }
+
+        // Lógica de conversión de bytes del proyecto de referencia
+        private byte[] BitmapToBytes(Bitmap bmp)
+        {
+            BitmapData bmpData = null;
+            try
+            {
+                bmpData = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, bmp.PixelFormat);
+
+                int bytesPerPixel = 4;
+                int widthInBytes = bmp.Width * bytesPerPixel;
+                int size = widthInBytes * bmp.Height;
+                byte[] rgbValues = new byte[size];
+
+                // Copia línea a línea usando aritmética de punteros (IntPtr.Add)
+                // Esta es la forma más segura de manejar el Stride
+                for (int y = 0; y < bmp.Height; y++)
+                {
+                    IntPtr rowPtr = IntPtr.Add(bmpData.Scan0, y * bmpData.Stride);
+                    Marshal.Copy(rowPtr, rgbValues, y * widthInBytes, widthInBytes);
+                }
+
+                return rgbValues;
             }
             finally
             {
-                bmp.UnlockBits(data);
+                if (bmpData != null) bmp.UnlockBits(bmpData);
             }
         }
 
@@ -185,41 +280,50 @@ namespace NxDesk.Infrastructure.Services
                 if (wrapper?.Type == "input")
                 {
                     var ev = JsonConvert.DeserializeObject<InputEvent>(wrapper.Payload);
-                    switch (ev.EventType)
-                    {
-                        case "mousemove":
-                            _inputSimulator.MoveMouse(ev.X!.Value, ev.Y!.Value, _currentScreenIndex);
-                            break;
-                        case "mousedown":
-                            _inputSimulator.Click(ev.Button!, true);
-                            break;
-                        case "mouseup":
-                            _inputSimulator.Click(ev.Button!, false);
-                            break;
-                        case "keydown":
-                            _inputSimulator.SendKey(ev.Key!, true);
-                            break;
-                        case "keyup":
-                            _inputSimulator.SendKey(ev.Key!, false);
-                            break;
-                        case "control" when ev.Command == "switch_screen":
-                            _currentScreenIndex = ev.Value ?? 0;
-                            SendScreenList();
-                            break;
-                    }
+                    ProcessInputEvent(ev);
                 }
             }
             catch { }
         }
 
+        private void ProcessInputEvent(InputEvent ev)
+        {
+            if (ev == null) return;
+            switch (ev.EventType)
+            {
+                case "mousemove":
+                    _inputSimulator.MoveMouse(ev.X!.Value, ev.Y!.Value, _currentScreenIndex);
+                    break;
+                case "mousedown":
+                    _inputSimulator.Click(ev.Button!, true);
+                    break;
+                case "mouseup":
+                    _inputSimulator.Click(ev.Button!, false);
+                    break;
+                case "keydown":
+                    _inputSimulator.SendKey(ev.Key!, true);
+                    break;
+                case "keyup":
+                    _inputSimulator.SendKey(ev.Key!, false);
+                    break;
+                case "control" when ev.Command == "switch_screen":
+                    _currentScreenIndex = ev.Value ?? 0;
+                    SendScreenList();
+                    break;
+            }
+        }
+
         private void SendScreenList()
         {
             if (_dataChannel?.readyState != RTCDataChannelState.open) return;
-
-            var names = Screen.AllScreens.Select((s, i) => $"Pantalla {i + 1}").ToList();
-            var payload = JsonConvert.SerializeObject(new ScreenInfoPayload { ScreenNames = names });
-            var msg = new DataChannelMessage { Type = "system:screen_info", Payload = payload };
-            _dataChannel.send(JsonConvert.SerializeObject(msg));
+            try
+            {
+                var names = Screen.AllScreens.Select((s, i) => $"Pantalla {i + 1}").ToList();
+                var payload = JsonConvert.SerializeObject(new ScreenInfoPayload { ScreenNames = names });
+                var msg = new DataChannelMessage { Type = "system:screen_info", Payload = payload };
+                _dataChannel.send(JsonConvert.SerializeObject(msg));
+            }
+            catch { }
         }
 
         private void Log(string message)

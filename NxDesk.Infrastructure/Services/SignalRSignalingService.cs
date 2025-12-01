@@ -18,12 +18,8 @@ namespace NxDesk.Infrastructure.Services
         public SignalRSignalingService(IConfiguration configuration)
         {
             string configUrl = configuration["SignalR:ServerUrl"];
-
-            Debug.WriteLine($"[SignalR Config] URL leída de appsettings: '{configUrl}'");
-
+            // Usamos localhost por defecto si no hay config, asegurando puerto 5000
             _serverUrl = !string.IsNullOrEmpty(configUrl) ? configUrl : "http://localhost:5000/signalinghub";
-
-            Debug.WriteLine($"[SignalR Config] URL final a usar: '{_serverUrl}'");
 
             _hubConnection = new HubConnectionBuilder()
                   .WithUrl(_serverUrl, options =>
@@ -38,6 +34,9 @@ namespace NxDesk.Infrastructure.Services
 
             _hubConnection.On<SdpMessage>("ReceiveMessage", async (message) =>
             {
+                // --- LOG DE DEPURACIÓN ---
+                Debug.WriteLine($"[SignalR] Mensaje recibido del Host. Tipo: {message.Type}");
+
                 if (OnMessageReceived != null)
                 {
                     await OnMessageReceived.Invoke(message);
@@ -47,7 +46,6 @@ namespace NxDesk.Infrastructure.Services
 
         public string? GetConnectionId() => _hubConnection?.ConnectionId;
 
-
         public async Task<bool> ConnectAsync(string roomId)
         {
             _roomId = roomId;
@@ -55,7 +53,7 @@ namespace NxDesk.Infrastructure.Services
             {
                 if (_hubConnection.State == HubConnectionState.Disconnected)
                 {
-                    Debug.WriteLine("[SignalR] Iniciando conexión...");
+                    Debug.WriteLine($"[SignalR] Conectando a {_serverUrl}...");
                     await _hubConnection.StartAsync();
                     Debug.WriteLine("[SignalR] Conexión establecida.");
                 }
@@ -66,17 +64,16 @@ namespace NxDesk.Infrastructure.Services
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"[SignalR Error] Fallo al conectar a {_serverUrl}: {ex.Message}");
-                if (ex.InnerException != null)
-                {
-                    Debug.WriteLine($"[SignalR Error Inner] {ex.InnerException.Message}");
-                }
+                Debug.WriteLine($"[SignalR Error] {ex.Message}");
                 return false;
             }
-        }        public async Task RelayMessageAsync(SdpMessage message)
+        }
+
+        public async Task RelayMessageAsync(SdpMessage message)
         {
             if (_hubConnection.State == HubConnectionState.Connected)
             {
+                Debug.WriteLine($"[SignalR] Enviando mensaje al Host: {message.Type}");
                 await _hubConnection.InvokeAsync("RelayMessage", _roomId, message);
             }
         }
