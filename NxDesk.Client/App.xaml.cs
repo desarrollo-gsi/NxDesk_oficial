@@ -6,10 +6,123 @@ using NxDesk.Client.Views.WelcomeView.ViewModel;
 using NxDesk.Infrastructure.Services;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 
 namespace NxDesk.Client
 {
+    /// <summary>
+    /// Esta clase asegura que los procesos hijos mueran instantáneamente
+    /// si el proceso padre (esta App) se cierra, crashea o es detenido.
+    /// </summary>
+    public static class ChildProcessTracker
+    {
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);
+
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool SetInformationJobObject(IntPtr hJob, JobObjectInfoType infoType, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool CloseHandle(IntPtr hObject);
+
+        private static IntPtr _hJob;
+
+        static ChildProcessTracker()
+        {
+            // Crea el Job Object
+            _hJob = CreateJobObject(IntPtr.Zero, null);
+
+            var info = new JOBOBJECT_BASIC_LIMIT_INFORMATION
+            {
+                LimitFlags = 0x2000 // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            };
+
+            var extendedInfo = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+            {
+                BasicLimitInformation = info
+            };
+
+            int length = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));
+            IntPtr extendedInfoPtr = Marshal.AllocHGlobal(length);
+
+            try
+            {
+                Marshal.StructureToPtr(extendedInfo, extendedInfoPtr, false);
+                // Configura el Job para matar procesos al cerrar el handle
+                if (!SetInformationJobObject(_hJob, JobObjectInfoType.ExtendedLimitInformation, extendedInfoPtr, (uint)length))
+                {
+                    throw new InvalidOperationException("No se pudo configurar el Job Object para auto-kill.");
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(extendedInfoPtr);
+            }
+        }
+
+        /// <summary>
+        /// Agrega un proceso al Job Object. Windows lo matará cuando esta App termine.
+        /// </summary>
+        public static void AddProcess(Process process)
+        {
+            if (_hJob != IntPtr.Zero)
+            {
+                bool success = AssignProcessToJobObject(_hJob, process.Handle);
+                if (!success && !process.HasExited)
+                {
+                    // Fallback si falla el Job Object (raro)
+                    // Podrías loguear un error aquí
+                }
+            }
+        }
+    }
+
+    // Estructuras necesarias para la API de Windows
+    public enum JobObjectInfoType { ExtendedLimitInformation = 9 }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_BASIC_LIMIT_INFORMATION
+    {
+        public Int64 PerProcessUserTimeLimit;
+        public Int64 PerJobUserTimeLimit;
+        public UInt32 LimitFlags;
+        public UIntPtr MinimumWorkingSetSize;
+        public UIntPtr MaximumWorkingSetSize;
+        public UInt32 ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public UInt32 PriorityClass;
+        public UInt32 SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct IO_COUNTERS
+    {
+        public UInt64 ReadOperationCount;
+        public UInt64 WriteOperationCount;
+        public UInt64 OtherOperationCount;
+        public UInt64 ReadTransferCount;
+        public UInt64 WriteTransferCount;
+        public UInt64 OtherTransferCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    {
+        public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation;
+        public IO_COUNTERS IoInfo;
+        public UIntPtr ProcessMemoryLimit;
+        public UIntPtr JobMemoryLimit;
+        public UIntPtr PeakProcessMemoryUsed;
+        public UIntPtr PeakJobMemoryUsed;
+    }
+
     public partial class App : System.Windows.Application
     {
         public IServiceProvider Services { get; private set; }
@@ -122,7 +235,13 @@ namespace NxDesk.Client
                     WindowStyle = ProcessWindowStyle.Hidden
                 };
 
-                return Process.Start(startInfo);
+                var process = Process.Start(startInfo);
+
+                if (process != null)
+                {
+                    ChildProcessTracker.AddProcess(process);
+                }         
+                return process;
             }
             catch (Exception ex)
             {
