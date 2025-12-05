@@ -47,14 +47,11 @@ namespace NxDesk.Infrastructure.Services
             {
                 try
                 {
-                    // 1. Decodificar VP8 a Píxeles Crudos
-                    // Solicitamos Bgra, pero debemos verificar qué nos devuelve realmente por el tamaño
                     var rawSamples = _vpxDecoder.DecodeVideo(frame, VideoPixelFormatsEnum.Bgra, VideoCodecsEnum.VP8);
                     if (rawSamples != null)
                     {
                         foreach (var sample in rawSamples)
                         {
-                            // 2. Crear BMP válido dinámicamente
                             var bmpBytes = CreateBitmapFromPixels(sample.Sample, (int)sample.Width, (int)sample.Height);
                             if (bmpBytes != null)
                             {
@@ -117,46 +114,37 @@ namespace NxDesk.Infrastructure.Services
             });
             return true;
         }
-        // MÉTODO CORREGIDO Y BLINDADO
+
         private byte[] CreateBitmapFromPixels(byte[] pixels, int width, int height)
         {
             if (pixels == null || pixels.Length == 0 || width <= 0 || height <= 0) return null;
-            // Calcular profundidad de color real basada en el tamaño del buffer
-            // Si pixels.Length == width * height * 3 -> es 24 bits (RGB)
-            // Si pixels.Length == width * height * 4 -> es 32 bits (BGRA)
             int bytesPerPixel = pixels.Length / (width * height);
             short bitsPerPixel = (short)(bytesPerPixel * 8);
-            // Validar que sea un formato soportado (24 o 32 bits)
             if (bitsPerPixel != 24 && bitsPerPixel != 32)
             {
                 Debug.WriteLine($"[BMP ERROR] Formato de píxel extraño: {bitsPerPixel} bits/pixel. W={width}, H={height}, Len={pixels.Length}");
-                // Intento de recuperación: asumir 32 bits y que sobra/falta algo, o retornar null
-                // return null; // Descomentar si prefieres no mostrar nada a mostrar basura
-                bitsPerPixel = 32; // Fallback a lo estándar
+                bitsPerPixel = 32; 
             }
             using (var stream = new MemoryStream())
             {
                 using (var writer = new BinaryWriter(stream))
                 {
-                    // 1. File Header (14 bytes)
-                    writer.Write((byte)0x42); // 'B'
-                    writer.Write((byte)0x4D); // 'M'
-                    writer.Write(54 + pixels.Length); // File Size
-                    writer.Write(0); // Reserved
-                    writer.Write(54); // Offset to pixel data
-                    // 2. Info Header (40 bytes)
-                    writer.Write(40); // Header Size
+                    writer.Write((byte)0x42); 
+                    writer.Write((byte)0x4D); 
+                    writer.Write(54 + pixels.Length);
+                    writer.Write(0); 
+                    writer.Write(54); 
+                    writer.Write(40); 
                     writer.Write(width);
-                    writer.Write(-height); // Top-down
-                    writer.Write((short)1); // Planes
-                    writer.Write(bitsPerPixel); // Bits per pixel (Calculado dinámicamente)
-                    writer.Write(0); // Compression
-                    writer.Write(pixels.Length); // Image Size
+                    writer.Write(-height); 
+                    writer.Write((short)1); 
+                    writer.Write(bitsPerPixel); 
+                    writer.Write(0);
+                    writer.Write(pixels.Length); 
                     writer.Write(0);
                     writer.Write(0);
                     writer.Write(0);
                     writer.Write(0);
-                    // 3. Pixel Data
                     writer.Write(pixels);
                 }
                 return stream.ToArray();

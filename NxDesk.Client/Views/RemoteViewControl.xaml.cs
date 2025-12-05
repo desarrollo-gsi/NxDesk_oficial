@@ -7,14 +7,12 @@ namespace NxDesk.Client.Views
 {
     public partial class RemoteViewControl : UserControl
     {
-        // El evento que MainWindow está buscando
         public event Action<InputEvent> OnInputEvent;
 
         public RemoteViewControl()
         {
             InitializeComponent();
 
-            // Asegúrate de que tu XAML tenga un Image llamado "VideoImage"
             VideoImage.MouseMove += (s, e) => SendMouse("mousemove", e);
             VideoImage.MouseDown += (s, e) => SendMouse("mousedown", e);
             VideoImage.MouseUp += (s, e) => SendMouse("mouseup", e);
@@ -24,7 +22,6 @@ namespace NxDesk.Client.Views
             };
         }
 
-        // El método que MainWindow está buscando
         public void SetFrame(BitmapSource frame)
         {
             VideoImage.Source = frame;

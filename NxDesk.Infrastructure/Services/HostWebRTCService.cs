@@ -4,18 +4,15 @@ using NxDesk.Application.Interfaces;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
 using SIPSorceryMedia.Encoders;
-using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Windows.Forms;
-using System.IO; // <--- CORRECCIÓN: Agregado para que reconozca Path y File
+using System.IO; 
 namespace NxDesk.Infrastructure.Services
 {
     public class HostWebRTCService
     {
-        // Importante para que Windows lea la resolución real y no la escalada (evita borrosidad)
         [DllImport("user32.dll")]
         private static extern bool SetProcessDPIAware();
         private readonly ISignalingService _signalingService;
@@ -32,6 +29,7 @@ namespace NxDesk.Infrastructure.Services
             _inputSimulator = inputSimulator;
             _signalingService.OnMessageReceived += HandleSignalingMessage;
         }
+
         public async Task StartAsync(string hostId)
         {
             await _signalingService.ConnectAsync(hostId);
@@ -49,7 +47,6 @@ namespace NxDesk.Infrastructure.Services
                         iceServers = new List<RTCIceServer> { new() { urls = "stun:stun.l.google.com:19302" } }
                     };
                     _peerConnection = new RTCPeerConnection(config);
-                    // VP8 es el códec estándar compatible.
                     var videoFormats = new List<VideoFormat> { new VideoFormat(VideoCodecsEnum.VP8, 96) };
                     var videoTrack = new MediaStreamTrack(videoFormats, MediaStreamStatusEnum.SendOnly);
                     _peerConnection.addTrack(videoTrack);
@@ -101,6 +98,7 @@ namespace NxDesk.Infrastructure.Services
                 Log($"[Signaling Error] {ex.Message}");
             }
         }
+
         private async Task CaptureLoop()
         {
             Log("[Host] Bucle de captura iniciado (Modo: 1080p High Quality).");
@@ -120,15 +118,11 @@ namespace NxDesk.Infrastructure.Services
                 var startTime = DateTime.Now;
                 try
                 {
-                    // Captura la pantalla
                     using (var bitmap = CaptureScreenRaw())
                     {
                         if (bitmap != null)
                         {
-                            // Convertir Bitmap a bytes crudos (optimizada)
                             var rawBuffer = BitmapToBytes(bitmap);
-                            // MEJORA 1: Usar formato 'Bgr'.
-                            // Corrige los colores invertidos (Azul/Rojo).
                             var encodedBuffer = _vpxEncoder.EncodeVideo(
                                 bitmap.Width,
                                 bitmap.Height,
@@ -145,15 +139,13 @@ namespace NxDesk.Infrastructure.Services
                 }
                 catch (Exception ex)
                 {
-                    // Log silencioso para evitar saturación en bucles rápidos
                 }
-                // MEJORA 2: Control de FPS aumentado a ~60 FPS para mayor fluidez en movimientos.
-                // 16ms delay objetivo. Esto reduce el lag y la borrosidad perceived en movimiento rápido.
                 var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
                 var waitTime = 16 - (int)elapsed;
                 if (waitTime > 0) await Task.Delay(waitTime);
             }
         }
+
         private Bitmap CaptureScreenRaw()
         {
             try
@@ -201,6 +193,7 @@ namespace NxDesk.Infrastructure.Services
                 return null;
             }
         }
+
         private byte[] BitmapToBytes(Bitmap bmp)
         {
             BitmapData bmpData = null;
@@ -223,6 +216,7 @@ namespace NxDesk.Infrastructure.Services
                 if (bmpData != null) bmp.UnlockBits(bmpData);
             }
         }
+
         private void HandleInputData(byte[] data)
         {
             try
@@ -241,6 +235,7 @@ namespace NxDesk.Infrastructure.Services
             }
             catch { }
         }
+
         private void ProcessInputEvent(InputEvent ev)
         {
             if (ev == null) return;
@@ -276,6 +271,7 @@ namespace NxDesk.Infrastructure.Services
                     break;
             }
         }
+
         private void SendScreenList()
         {
             if (_dataChannel?.readyState != RTCDataChannelState.open) return;
@@ -288,6 +284,7 @@ namespace NxDesk.Infrastructure.Services
             }
             catch { }
         }
+
         private void Log(string message)
         {
             try

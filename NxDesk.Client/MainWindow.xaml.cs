@@ -42,7 +42,7 @@ namespace NxDesk.Client
             {
                 if (e.PropertyName == nameof(MainViewModel.IsConnected))
                 {
-                    UpdateView(_viewModel.IsConnected);
+                    Dispatcher.Invoke(() => UpdateView(_viewModel.IsConnected));
                 }
                 else if (e.PropertyName == nameof(MainViewModel.CurrentFrame))
                 {
@@ -53,7 +53,10 @@ namespace NxDesk.Client
                 }
                 else if (e.PropertyName == nameof(MainViewModel.RemoteScreens))
                 {
-                    PopulateScreenMenu();
+                    Dispatcher.Invoke(() =>
+                    {
+                        PopulateScreenMenu();
+                    });
                 }
             };
             UpdateView(false);
@@ -77,9 +80,6 @@ namespace NxDesk.Client
 
         private async void ConnectButton_Click(object sender, RoutedEventArgs e)
         {
-            Debug.WriteLine("--------------------------------------------------");
-            Debug.WriteLine($"[UI] Botón Conectar presionado. Texto ID: '{RoomIdTextBox.Text}'");
-
             if (string.IsNullOrWhiteSpace(RoomIdTextBox.Text))
             {
                 Debug.WriteLine("[UI] Error: El ID está vacío.");
