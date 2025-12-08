@@ -148,5 +148,12 @@ namespace NxDesk.Client.ViewModels
         {
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
         }
+
+        public void SendClipboardData(string text)
+        {
+            if (!IsConnected || string.IsNullOrEmpty(text)) return;
+            var ev = new InputEvent { EventType = "clipboard", ClipboardContent = text };
+            _webRTCService.SendInputEvent(ev);
+        }
     }
 }

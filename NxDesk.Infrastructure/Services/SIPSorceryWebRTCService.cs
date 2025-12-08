@@ -170,6 +170,7 @@ namespace NxDesk.Infrastructure.Services
                 _dataChannel.send(JsonConvert.SerializeObject(wrapper));
             }
         }
+
         private async Task HandleSignalingMessage(SdpMessage message)
         {
             if (_pc == null) return;
@@ -192,6 +193,7 @@ namespace NxDesk.Infrastructure.Services
             }
             catch (Exception ex) { Debug.WriteLine(ex.Message); }
         }
+
         public async Task DisposeAsync()
         {
             _dataChannel?.close();

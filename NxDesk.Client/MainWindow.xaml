@@ -31,15 +31,30 @@
                     <Setter.Value>
                         <ControlTemplate TargetType="Button">
                             <Border x:Name="border" Background="{TemplateBinding Background}" CornerRadius="5">
-                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                <ContentPresenter x:Name="content" 
+                                      HorizontalAlignment="Center" 
+                                      VerticalAlignment="Center"
+                                      RenderTransformOrigin="0.5,0.5">
+                                    <ContentPresenter.RenderTransform>
+                                        <ScaleTransform ScaleX="1" ScaleY="1"/>
+                                    </ContentPresenter.RenderTransform>
+                                </ContentPresenter>
                             </Border>
                             <ControlTemplate.Triggers>
                                 <Trigger Property="IsMouseOver" Value="True">
                                     <Setter TargetName="border" Property="Background" Value="#3E3E42"/>
                                 </Trigger>
+
                                 <Trigger Property="IsPressed" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#505050"/>
+                                    <Setter TargetName="border" Property="Background" Value="Transparent"/>
+
+                                    <Setter TargetName="content" Property="RenderTransform">
+                                        <Setter.Value>
+                                            <ScaleTransform ScaleX="0.85" ScaleY="0.85"/>
+                                        </Setter.Value>
+                                    </Setter>
                                 </Trigger>
+
                                 <Trigger Property="IsEnabled" Value="False">
                                     <Setter Property="Opacity" Value="0.5"/>
                                 </Trigger>
@@ -183,39 +198,6 @@
                 </Setter>
             </Style>
 
-            <Style x:Key="CubeMenuButtonStyle" TargetType="Button">
-                <Setter Property="Background" Value="#2D2D30"/>
-                <Setter Property="Foreground" Value="White"/>
-                <Setter Property="BorderThickness" Value="0"/>
-                <Setter Property="Width" Value="40"/>
-                <Setter Property="Height" Value="40"/>
-                <Setter Property="Cursor" Value="Hand"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border x:Name="border" 
-                                Background="{TemplateBinding Background}" 
-                                CornerRadius="10"
-                                BorderThickness="1"
-                                BorderBrush="#3E3E42">
-                                <ContentPresenter HorizontalAlignment="Center" 
-                                              VerticalAlignment="Center"/>
-                            </Border>
-                            <ControlTemplate.Triggers>
-                                <Trigger Property="IsMouseOver" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#3E3E42"/>
-                                    <Setter TargetName="border" Property="BorderBrush" Value="#505050"/>
-                                </Trigger>
-                                <Trigger Property="IsPressed" Value="True">
-                                    <Setter TargetName="border" Property="Background" Value="#007ACC"/>
-                                    <Setter TargetName="border" Property="BorderBrush" Value="#007ACC"/>
-                                </Trigger>
-                            </ControlTemplate.Triggers>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
         </Border.Resources>
 
         <Grid x:Name="MainGrid">
@@ -293,18 +275,18 @@
 
                         <Button x:Name="MenuButton"
                             Click="MenuButton_Click" 
-                            Style="{StaticResource CubeMenuButtonStyle}"
+                            Style="{StaticResource ModernIconButton}"
                             ToolTip="Pantallas"
                             Margin="0,0,10,0">
 
                             <Button.ContextMenu>
                                 <ContextMenu x:Name="ScreenContextMenu" 
-                                         Style="{StaticResource ModernContextMenuStyle}">
+                                        Style="{StaticResource ModernContextMenuStyle}">
                                     <MenuItem Header="Esperando pantallas..." IsEnabled="False"/>
                                 </ContextMenu>
                             </Button.ContextMenu>
 
-                            <Path Data="M3,3H9V9H3V3M11,3H17V9H11V3M3,11H9V17H3V11M11,11H17V17H11V11"
+                            <Path Data="M21,16H3V4H21M21,2H3C1.89,2 1,2.89 1,4V16A2,2 0 0,0 3,18H10V20H8V22H16V20H14V18H21A2,2 0 0,0 23,16V4C23,2.89 22.1,2 21,2Z"
                               Fill="{Binding RelativeSource={RelativeSource AncestorType=Button}, Path=Foreground}"
                               Stretch="Uniform"
                               Width="18" Height="18"
@@ -328,10 +310,6 @@
             <Border Grid.Row="2" Background="Transparent" Padding="12,6">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="Estado:" Foreground="White" FontWeight="SemiBold" Margin="0,0,5,0"/>
-                    <!-- 
-                         CORRECCIÓN AQUÍ: Agregamos {Binding StatusText} 
-                         Antes tenía texto fijo "Esperando conexión..." que no cambiaba.
-                    -->
                     <TextBlock x:Name="StatusTextBlock"
                          Text="{Binding StatusText}" Foreground="White" Opacity="0.9"/>
                 </StackPanel>

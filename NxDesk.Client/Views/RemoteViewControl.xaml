@@ -4,7 +4,7 @@
     <Border Background="#121212" ClipToBounds="True">
         <Image x:Name="VideoImage"
               Stretch="Uniform"
-              RenderOptions.BitmapScalingMode="HighQuality"
+              RenderOptions.BitmapScalingMode="LowQuality" 
               Cursor="Cross"/>
     </Border>
 </UserControl>
