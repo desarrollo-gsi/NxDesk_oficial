@@ -5,14 +5,25 @@ using System.Runtime.CompilerServices;
 using System.Windows.Media.Imaging;
 using System.IO;
 using System.Windows;
-using System.Windows.Input; // Para ICommand
-using System.Diagnostics; // <--- AGREGAR ESTO
+using System.Windows.Input;
+using System.Diagnostics;
+using System.Windows.Media;
 
 namespace NxDesk.Client.ViewModels
 {
     public class MainViewModel : INotifyPropertyChanged
     {
         private readonly IWebRTCService _webRTCService;
+        
+        // WriteableBitmap reutilizable para evitar allocations
+        private WriteableBitmap _writeableBitmap;
+        private int _lastWidth = 0;
+        private int _lastHeight = 0;
+        
+        // Estadísticas de rendimiento
+        private readonly Stopwatch _fpsStopwatch = Stopwatch.StartNew();
+        private int _frameCount = 0;
+        private double _currentFps = 0;
 
         // Estado de la conexión
         private bool _isConnected;
@@ -44,14 +55,29 @@ namespace NxDesk.Client.ViewModels
             get => _remoteScreens;
             set { _remoteScreens = value; OnPropertyChanged(); }
         }
+        
+        // FPS actual para mostrar en UI
+        public double CurrentFps => _currentFps;
 
         public MainViewModel(IWebRTCService webRTCService)
         {
             _webRTCService = webRTCService;
 
-            _webRTCService.OnConnectionStateChanged += (state) => StatusText = state;
+            _webRTCService.OnConnectionStateChanged += (state) => 
+            {
+                System.Windows.Application.Current?.Dispatcher.Invoke(() => StatusText = state);
+            };
+            
+            // Usar el nuevo evento optimizado con raw frames
+            _webRTCService.OnRawFrameReceived += HandleRawFrame;
+            
+            // Fallback al evento legacy por compatibilidad
             _webRTCService.OnVideoFrameReceived += HandleVideoFrame;
-            _webRTCService.OnScreensInfoReceived += (screens) => RemoteScreens = screens;
+            
+            _webRTCService.OnScreensInfoReceived += (screens) => 
+            {
+                System.Windows.Application.Current?.Dispatcher.Invoke(() => RemoteScreens = screens);
+            };
         }
 
         public async Task Connect(string hostId)
@@ -70,16 +96,19 @@ namespace NxDesk.Client.ViewModels
             {
                 Debug.WriteLine("[ViewModel] Llamando a WebRTCService.StartConnectionAsync...");
 
-                // Si ya cambiaste la interfaz a bool, usa esto:
-                // bool success = await _webRTCService.StartConnectionAsync(hostId);
-                // Debug.WriteLine($"[ViewModel] Resultado de conexión: {success}");
-
-                // Si sigues con la versión void Task:
-                await _webRTCService.StartConnectionAsync(hostId);
-                Debug.WriteLine("[ViewModel] WebRTCService terminó su ejecución (aparentemente exitosa).");
-
-                IsConnected = true;
-                Debug.WriteLine("[ViewModel] Estado cambiado a IsConnected = true");
+                bool success = await _webRTCService.StartConnectionAsync(hostId);
+                
+                if (success)
+                {
+                    Debug.WriteLine("[ViewModel] WebRTCService: conexión exitosa");
+                    IsConnected = true;
+                    StatusText = "Conectado";
+                }
+                else
+                {
+                    Debug.WriteLine("[ViewModel] WebRTCService: falló la conexión");
+                    StatusText = "Error: No se pudo conectar";
+                }
             }
             catch (Exception ex)
             {
@@ -90,10 +119,25 @@ namespace NxDesk.Client.ViewModels
 
         public async Task Disconnect()
         {
-            await _webRTCService.DisposeAsync();
-            IsConnected = false;
-            CurrentFrame = null;
-            StatusText = "Desconectado.";
+            try
+            {
+                await _webRTCService.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ViewModel] Error al desconectar: {ex.Message}");
+            }
+            finally
+            {
+                IsConnected = false;
+                CurrentFrame = null;
+                _writeableBitmap = null;
+                _lastWidth = 0;
+                _lastHeight = 0;
+                StatusText = "Desconectado.";
+                _frameCount = 0;
+                _currentFps = 0;
+            }
         }
 
         public void SendInput(string type, string key = null, double? x = null, double? y = null, string button = null, double? delta = null)
@@ -119,13 +163,70 @@ namespace NxDesk.Client.ViewModels
             _webRTCService.SendInputEvent(ev);
         }
 
+        /// <summary>
+        /// Maneja frames raw BGRA usando WriteableBitmap para máxima eficiencia.
+        /// Evita crear nuevos objetos BitmapImage por cada frame.
+        /// </summary>
+        private void HandleRawFrame(RawVideoFrame frame)
+        {
+            // Calcular FPS
+            UpdateFpsStats();
+            
+            try
+            {
+                // Crear o reutilizar WriteableBitmap
+                if (_writeableBitmap == null || 
+                    _lastWidth != frame.Width || 
+                    _lastHeight != frame.Height)
+                {
+                    // Solo crear nuevo bitmap si las dimensiones cambiaron
+                    _writeableBitmap = new WriteableBitmap(
+                        frame.Width, 
+                        frame.Height, 
+                        96, 96, 
+                        PixelFormats.Bgra32, 
+                        null);
+                    _lastWidth = frame.Width;
+                    _lastHeight = frame.Height;
+                    
+                    Debug.WriteLine($"[ViewModel] Created new WriteableBitmap: {frame.Width}x{frame.Height}");
+                }
+                
+                // Copiar píxeles directamente al buffer del WriteableBitmap
+                _writeableBitmap.WritePixels(
+                    new Int32Rect(0, 0, frame.Width, frame.Height),
+                    frame.Pixels,
+                    frame.Stride,
+                    0);
+                
+                // Actualizar el frame actual (WriteableBitmap se actualiza in-place)
+                if (CurrentFrame != _writeableBitmap)
+                {
+                    CurrentFrame = _writeableBitmap;
+                }
+                else
+                {
+                    // Forzar actualización de UI aunque sea el mismo objeto
+                    OnPropertyChanged(nameof(CurrentFrame));
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[ViewModel] Error en HandleRawFrame: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Handler legacy para frames BMP. Usado como fallback.
+        /// </summary>
         private void HandleVideoFrame(byte[] frameData)
         {
-            // --- LOG PARA DEPURAR ---
-            // Si ves esto en la consola, el video está llegando.
-            Debug.WriteLine($"[ViewModel] Frame recibido: {frameData.Length} bytes");
+            UpdateFpsStats();
 
-            System.Windows.Application.Current.Dispatcher.Invoke(() => {
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Render, 
+                () => 
+            {
                 try
                 {
                     using (var stream = new MemoryStream(frameData))
@@ -139,8 +240,25 @@ namespace NxDesk.Client.ViewModels
                         CurrentFrame = bitmap;
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[ViewModel] Error decodificando frame BMP: {ex.Message}");
+                }
             });
+        }
+        
+        private void UpdateFpsStats()
+        {
+            _frameCount++;
+            if (_fpsStopwatch.ElapsedMilliseconds >= 1000)
+            {
+                _currentFps = _frameCount * 1000.0 / _fpsStopwatch.ElapsedMilliseconds;
+                _frameCount = 0;
+                _fpsStopwatch.Restart();
+                
+                Debug.WriteLine($"[ViewModel] Render FPS: {_currentFps:F1}");
+                OnPropertyChanged(nameof(CurrentFps));
+            }
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

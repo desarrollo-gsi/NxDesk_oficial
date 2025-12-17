@@ -4,6 +4,7 @@ using NxDesk.Application.Interfaces;
 using SIPSorcery.Net;
 using SIPSorceryMedia.Abstractions;
 using SIPSorceryMedia.Encoders;
+using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -13,7 +14,7 @@ namespace NxDesk.Infrastructure.Services
 {
     public class HostWebRTCService
     {
-        // --- IMPORTACIONES NATIVAS (NO TOCAR) ---
+        // --- IMPORTACIONES NATIVAS PARA FALLBACK GDI ---
         [DllImport("user32.dll")] private static extern IntPtr GetDesktopWindow();
         [DllImport("user32.dll")] private static extern IntPtr GetWindowDC(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern IntPtr ReleaseDC(IntPtr hWnd, IntPtr hDC);
@@ -33,6 +34,20 @@ namespace NxDesk.Infrastructure.Services
         private int _currentScreenIndex = 0;
         private RTCDataChannel _dataChannel;
         private readonly VpxVideoEncoder _vpxEncoder = new VpxVideoEncoder();
+        
+        // DXGI Desktop Duplication
+        private DesktopDuplicationCapture _dxgiCapture;
+        private bool _useDxgi = true;
+        private int _dxgiFailCount = 0;
+        private const int MAX_DXGI_FAILS = 5;
+        
+        // Estadísticas
+        private readonly Stopwatch _fpsStopwatch = Stopwatch.StartNew();
+        private int _frameCount = 0;
+        
+        // Buffers reutilizables para evitar allocations (mejora FPS)
+        private byte[] _captureBuffer;
+        private int _lastBufferSize = 0;
 
         public HostWebRTCService(ISignalingService signalingService, IInputSimulator inputSimulator)
         {
@@ -57,7 +72,27 @@ namespace NxDesk.Infrastructure.Services
                     Log("[Host] Oferta recibida. Iniciando...");
                     var config = new RTCConfiguration
                     {
-                        iceServers = new List<RTCIceServer> { new() { urls = "stun:stun.l.google.com:19302" } }
+                        iceServers = new List<RTCIceServer>
+                        {
+                            // Múltiples servidores STUN para mejor conectividad
+                            new() { urls = "stun:stun.l.google.com:19302" },
+                            new() { urls = "stun:stun1.l.google.com:19302" },
+                            new() { urls = "stun:stun2.l.google.com:19302" },
+                            new() { urls = "stun:stun.cloudflare.com:3478" },
+                            // Servidor TURN gratuito para NAT estrictos
+                            new() 
+                            { 
+                                urls = "turn:openrelay.metered.ca:80",
+                                username = "openrelayproject",
+                                credential = "openrelayproject"
+                            },
+                            new() 
+                            { 
+                                urls = "turn:openrelay.metered.ca:443",
+                                username = "openrelayproject",
+                                credential = "openrelayproject"
+                            }
+                        }
                     };
                     _peerConnection = new RTCPeerConnection(config);
 
@@ -108,12 +143,23 @@ namespace NxDesk.Infrastructure.Services
 
         private async Task CaptureLoop()
         {
-            Log("[Host] CaptureLoop: Iniciando modo 32-bit High Performance.");
+            // Intentar inicializar DXGI primero
+            _dxgiCapture = new DesktopDuplicationCapture();
+            _useDxgi = _dxgiCapture.Initialize(_currentScreenIndex);
+            // Usar siempre GDI por estabilidad (DXGI tiene problemas con frames vacíos)
+            Log("[Host] CaptureLoop: Usando GDI para captura estable");
+            _useDxgi = false;
+            _dxgiCapture?.Dispose();
+            _dxgiCapture = null;
 
             while (_isCapturing)
             {
                 if (_peerConnection?.connectionState == RTCPeerConnectionState.closed ||
-                    _peerConnection?.connectionState == RTCPeerConnectionState.failed) break;
+                    _peerConnection?.connectionState == RTCPeerConnectionState.failed) 
+                {
+                    Log("[Host] Conexión cerrada o fallida, saliendo del loop");
+                    break;
+                }
 
                 if (_peerConnection?.connectionState != RTCPeerConnectionState.connected)
                 {
@@ -124,16 +170,13 @@ namespace NxDesk.Infrastructure.Services
                 var startTime = DateTime.Now;
                 try
                 {
-                    using (var bitmap = CaptureScreenRaw())
+                    using var bitmap = CaptureScreenGDI();
+                    if (bitmap != null)
                     {
-                        if (bitmap != null)
+                        var rawBuffer = BitmapToBytes(bitmap);
+                        
+                        if (rawBuffer != null && rawBuffer.Length > 0)
                         {
-                            // 1. Convertimos el Bitmap a bytes crudos (BGRA)
-                            var rawBuffer = BitmapToBytes(bitmap);
-
-                            // 2. Codificamos. ¡Aquí está la magia!
-                            // 'Bgra' le dice al encoder que lea 4 bytes por pixel.
-                            // Esto arregla el color morado y las rayas.
                             var encodedBuffer = _vpxEncoder.EncodeVideo(
                                 bitmap.Width,
                                 bitmap.Height,
@@ -145,27 +188,40 @@ namespace NxDesk.Infrastructure.Services
                             {
                                 uint timestamp = (uint)(DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond);
                                 _peerConnection.SendVideo(timestamp, encodedBuffer);
+                                
+                                // Estadísticas de FPS cada 5 segundos
+                                _frameCount++;
+                                if (_fpsStopwatch.ElapsedMilliseconds >= 5000)
+                                {
+                                    double fps = _frameCount * 1000.0 / _fpsStopwatch.ElapsedMilliseconds;
+                                    Log($"[Host] Capture FPS: {fps:F1}");
+                                    _frameCount = 0;
+                                    _fpsStopwatch.Restart();
+                                }
                             }
                         }
                     }
                 }
-                catch (Exception ex) { }
-
-                // Limpieza de memoria (Garbage Collection) cada ~5 segundos
-                if (DateTime.Now.Second % 5 == 0)
-                {
-                    GC.Collect();
-                    GC.WaitForPendingFinalizers();
+                catch (Exception ex) 
+                { 
+                    Log($"[Capture Error] {ex.Message}");
                 }
 
-                // Control de FPS (Objetivo: 30 FPS para balancear calidad)
+                // Control de FPS (Objetivo: ~30 FPS)
                 var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
-                var waitTime = 33 - (int)elapsed;
-                if (waitTime > 0) await Task.Delay(waitTime);
+                var waitTime = Math.Max(1, 33 - (int)elapsed); // 33ms = 30 FPS
+                await Task.Delay(waitTime);
             }
+            
+            // Cleanup
+            _dxgiCapture?.Dispose();
+            _dxgiCapture = null;
         }
 
-        private Bitmap CaptureScreenRaw()
+        /// <summary>
+        /// Captura de pantalla con GDI (fallback).
+        /// </summary>
+        private Bitmap CaptureScreenGDI()
         {
             try
             {
@@ -191,11 +247,8 @@ namespace NxDesk.Infrastructure.Services
                 Bitmap finalBitmap = null;
                 if (success)
                 {
-                    // Obtenemos el bitmap nativo
                     using (var tmp = Image.FromHbitmap(hBmp))
                     {
-                        // CLONAMOS explícitamente a 32bppArgb.
-                        // Esto garantiza que el buffer de memoria sea perfecto para el encoder.
                         finalBitmap = tmp.Clone(new Rectangle(0, 0, tmp.Width, tmp.Height), PixelFormat.Format32bppArgb);
                     }
                 }
@@ -209,7 +262,7 @@ namespace NxDesk.Infrastructure.Services
             }
             catch (Exception ex)
             {
-                Log($"[Capture Error] {ex.Message}");
+                Log($"[GDI Capture Error] {ex.Message}");
                 return null;
             }
         }
@@ -219,16 +272,18 @@ namespace NxDesk.Infrastructure.Services
             BitmapData bmpData = null;
             try
             {
-                // Bloqueamos los bits en memoria
                 bmpData = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, bmp.PixelFormat);
-
                 int bytes = Math.Abs(bmpData.Stride) * bmp.Height;
-                byte[] rgbValues = new byte[bytes];
-
-                // Copia ultrarrápida de memoria a array
-                Marshal.Copy(bmpData.Scan0, rgbValues, 0, bytes);
-
-                return rgbValues;
+                
+                // Reutilizar buffer si el tamaño es el mismo
+                if (_captureBuffer == null || _lastBufferSize != bytes)
+                {
+                    _captureBuffer = new byte[bytes];
+                    _lastBufferSize = bytes;
+                }
+                
+                Marshal.Copy(bmpData.Scan0, _captureBuffer, 0, bytes);
+                return _captureBuffer;
             }
             finally
             {
@@ -279,7 +334,11 @@ namespace NxDesk.Infrastructure.Services
                 _inputSimulator.Scroll((int)ev.Delta.Value);
 
             else if (ev.EventType == "control" && ev.Command == "switch_screen")
-            { _currentScreenIndex = ev.Value ?? 0; SendScreenList(); }
+            { 
+                _currentScreenIndex = ev.Value ?? 0;
+                Log($"[Host] Cambiando a pantalla {_currentScreenIndex}");
+                SendScreenList(); 
+            }
 
             else if (ev.EventType == "clipboard" && !string.IsNullOrEmpty(ev.ClipboardContent))
             {
@@ -304,7 +363,11 @@ namespace NxDesk.Infrastructure.Services
 
         private void Log(string message)
         {
-            try { File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "host_service.log"), $"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}"); } catch { }
+            try 
+            { 
+                System.Diagnostics.Debug.WriteLine(message);
+                File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "host_service.log"), $"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}"); 
+            } catch { }
         }
     }
 }

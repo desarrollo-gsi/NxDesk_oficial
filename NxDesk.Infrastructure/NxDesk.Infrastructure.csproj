@@ -14,6 +14,10 @@
 		<PackageReference Include="SIPSorcery" Version="8.0.0" />
 		<PackageReference Include="SIPSorceryMedia.Encoders" Version="8.0.7" />
 		<PackageReference Include="System.Text.Json" Version="8.0.5" />
+		<!-- DXGI Desktop Duplication para captura eficiente -->
+		<PackageReference Include="SharpDX" Version="4.2.0" />
+		<PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
+		<PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
 	</ItemGroup>
 
 	<ItemGroup>

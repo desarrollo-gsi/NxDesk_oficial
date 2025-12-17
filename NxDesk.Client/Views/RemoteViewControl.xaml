@@ -4,7 +4,9 @@
     <Border Background="#121212" ClipToBounds="True">
         <Image x:Name="VideoImage"
               Stretch="Uniform"
-              RenderOptions.BitmapScalingMode="LowQuality" 
+              RenderOptions.BitmapScalingMode="HighQuality"
+              RenderOptions.EdgeMode="Aliased"
+              SnapsToDevicePixels="True"
               Cursor="Cross"/>
     </Border>
 </UserControl>

@@ -8,6 +8,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Windows;
+
 namespace NxDesk.Infrastructure.Services
 {
     public class SIPSorceryWebRTCService : IWebRTCService
@@ -16,33 +17,67 @@ namespace NxDesk.Infrastructure.Services
         private RTCPeerConnection _pc;
         private RTCDataChannel _dataChannel;
         private readonly VpxVideoEncoder _vpxDecoder = new VpxVideoEncoder();
+        
+        // Eventos
         public event Action<string> OnConnectionStateChanged;
         public event Action<byte[]> OnVideoFrameReceived;
+        public event Action<RawVideoFrame> OnRawFrameReceived;
         public event Action<List<string>> OnScreensInfoReceived;
+        
+        // Estadísticas de frames
+        private int _decodedFrameCount = 0;
+        private readonly Stopwatch _statsStopwatch = Stopwatch.StartNew();
+        
         public SIPSorceryWebRTCService(ISignalingService signalingService)
         {
             _signalingService = signalingService;
             _signalingService.OnMessageReceived += HandleSignalingMessage;
         }
+        
         public async Task<bool> StartConnectionAsync(string hostId)
         {
             OnConnectionStateChanged?.Invoke("Conectando...");
+            
             if (!await _signalingService.ConnectAsync(hostId))
             {
                 OnConnectionStateChanged?.Invoke("Error de señalización");
                 return false;
             }
+            
             var config = new RTCConfiguration
             {
-                iceServers = new List<RTCIceServer> { new() { urls = "stun:stun.l.google.com:19302" } }
+                iceServers = new List<RTCIceServer> 
+                { 
+                    // Múltiples servidores STUN para mejor conectividad
+                    new() { urls = "stun:stun.l.google.com:19302" },
+                    new() { urls = "stun:stun1.l.google.com:19302" },
+                    new() { urls = "stun:stun2.l.google.com:19302" },
+                    new() { urls = "stun:stun.cloudflare.com:3478" },
+                    // Servidor TURN gratuito para NAT estrictos
+                    new() 
+                    { 
+                        urls = "turn:openrelay.metered.ca:80",
+                        username = "openrelayproject",
+                        credential = "openrelayproject"
+                    },
+                    new() 
+                    { 
+                        urls = "turn:openrelay.metered.ca:443",
+                        username = "openrelayproject",
+                        credential = "openrelayproject"
+                    }
+                }
             };
+            
             _pc = new RTCPeerConnection(config);
+            
             var videoFormats = new List<SDPAudioVideoMediaFormat>
             {
                 new SDPAudioVideoMediaFormat(new VideoFormat(VideoCodecsEnum.VP8, 96))
             };
             var videoTrack = new MediaStreamTrack(SDPMediaTypesEnum.video, false, videoFormats, MediaStreamStatusEnum.RecvOnly);
             _pc.addTrack(videoTrack);
+            
             _pc.OnVideoFrameReceived += (endpoint, timestamp, frame, format) =>
             {
                 try
@@ -52,13 +87,24 @@ namespace NxDesk.Infrastructure.Services
                     {
                         foreach (var sample in rawSamples)
                         {
-                            var bmpBytes = CreateBitmapFromPixels(sample.Sample, (int)sample.Width, (int)sample.Height);
-                            if (bmpBytes != null)
+                            _decodedFrameCount++;
+                            
+                            // Log estadísticas cada segundo
+                            if (_statsStopwatch.ElapsedMilliseconds >= 1000)
                             {
-                                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
-                                {
-                                    OnVideoFrameReceived?.Invoke(bmpBytes);
-                                });
+                                Debug.WriteLine($"[WebRTC] Decoded FPS: {_decodedFrameCount}, Frame size: {sample.Width}x{sample.Height}");
+                                _decodedFrameCount = 0;
+                                _statsStopwatch.Restart();
+                            }
+                            
+                            // Siempre enviar formato BMP (más estable por ahora)
+                            // TODO: Optimizar con WriteableBitmap una vez validado
+                            var bmpBytes = CreateBitmapFromPixels(sample.Sample, (int)sample.Width, (int)sample.Height);
+                            if (bmpBytes != null && OnVideoFrameReceived != null)
+                            {
+                                System.Windows.Application.Current?.Dispatcher.BeginInvoke(
+                                    System.Windows.Threading.DispatcherPriority.Render,
+                                    () => OnVideoFrameReceived?.Invoke(bmpBytes));
                             }
                         }
                     }
@@ -68,17 +114,21 @@ namespace NxDesk.Infrastructure.Services
                     Debug.WriteLine($"[CLIENT DECODE ERROR] {ex.Message}");
                 }
             };
+            
             _pc.onconnectionstatechange += state =>
             {
+                Debug.WriteLine($"[WebRTC] Connection state: {state}");
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
                     OnConnectionStateChanged?.Invoke(state.ToString());
                 });
             };
+            
             _pc.onicecandidate += async candidate =>
             {
                 if (candidate != null && !string.IsNullOrWhiteSpace(candidate.candidate))
                 {
+                    Debug.WriteLine($"[WebRTC] Sending ICE candidate");
                     await _signalingService.RelayMessageAsync(new SdpMessage
                     {
                         Type = "ice-candidate",
@@ -86,10 +136,20 @@ namespace NxDesk.Infrastructure.Services
                     });
                 }
             };
+            
+            _pc.onicegatheringstatechange += state =>
+            {
+                Debug.WriteLine($"[WebRTC] ICE gathering state: {state}");
+            };
+            
             _dataChannel = await _pc.createDataChannel("input-channel");
             if (_dataChannel != null)
             {
-                _dataChannel.onopen += () => RequestScreenList();
+                _dataChannel.onopen += () => 
+                {
+                    Debug.WriteLine("[WebRTC] Data channel opened");
+                    RequestScreenList();
+                };
                 _dataChannel.onmessage += (_, _, data) =>
                 {
                     try
@@ -105,42 +165,51 @@ namespace NxDesk.Infrastructure.Services
                     catch { }
                 };
             }
+            
             var offer = _pc.createOffer(null);
             await _pc.setLocalDescription(offer);
+            
+            Debug.WriteLine("[WebRTC] Sending offer");
             await _signalingService.RelayMessageAsync(new SdpMessage
             {
                 Type = "offer",
                 Payload = offer.sdp
             });
+            
             return true;
         }
 
         private byte[] CreateBitmapFromPixels(byte[] pixels, int width, int height)
         {
             if (pixels == null || pixels.Length == 0 || width <= 0 || height <= 0) return null;
+            
             int bytesPerPixel = pixels.Length / (width * height);
             short bitsPerPixel = (short)(bytesPerPixel * 8);
+            
             if (bitsPerPixel != 24 && bitsPerPixel != 32)
             {
-                Debug.WriteLine($"[BMP ERROR] Formato de píxel extraño: {bitsPerPixel} bits/pixel. W={width}, H={height}, Len={pixels.Length}");
+                Debug.WriteLine($"[BMP ERROR] Formato inesperado: {bitsPerPixel} bpp. W={width}, H={height}, Len={pixels.Length}");
                 bitsPerPixel = 32; 
             }
+            
             using (var stream = new MemoryStream())
             {
                 using (var writer = new BinaryWriter(stream))
                 {
-                    writer.Write((byte)0x42); 
-                    writer.Write((byte)0x4D); 
-                    writer.Write(54 + pixels.Length);
-                    writer.Write(0); 
-                    writer.Write(54); 
-                    writer.Write(40); 
+                    // BMP Header
+                    writer.Write((byte)0x42); // 'B'
+                    writer.Write((byte)0x4D); // 'M'
+                    writer.Write(54 + pixels.Length); // File size
+                    writer.Write(0); // Reserved
+                    writer.Write(54); // Pixel data offset
+                    // DIB Header
+                    writer.Write(40); // DIB header size
                     writer.Write(width);
-                    writer.Write(-height); 
-                    writer.Write((short)1); 
-                    writer.Write(bitsPerPixel); 
-                    writer.Write(0);
-                    writer.Write(pixels.Length); 
+                    writer.Write(-height); // Negative = top-down
+                    writer.Write((short)1); // Planes
+                    writer.Write(bitsPerPixel);
+                    writer.Write(0); // No compression
+                    writer.Write(pixels.Length);
                     writer.Write(0);
                     writer.Write(0);
                     writer.Write(0);
@@ -150,6 +219,7 @@ namespace NxDesk.Infrastructure.Services
                 return stream.ToArray();
             }
         }
+        
         public void RequestScreenList()
         {
             if (_dataChannel?.readyState == RTCDataChannelState.open)
@@ -158,6 +228,7 @@ namespace NxDesk.Infrastructure.Services
                 _dataChannel.send(JsonConvert.SerializeObject(msg));
             }
         }
+        
         public void SendInputEvent(InputEvent inputEvent)
         {
             if (_dataChannel?.readyState == RTCDataChannelState.open)
@@ -178,6 +249,7 @@ namespace NxDesk.Infrastructure.Services
             {
                 if (message.Type == "answer")
                 {
+                    Debug.WriteLine("[WebRTC] Received answer");
                     var sdpInit = new RTCSessionDescriptionInit
                     {
                         type = RTCSdpType.answer,
@@ -187,19 +259,30 @@ namespace NxDesk.Infrastructure.Services
                 }
                 else if (message.Type == "ice-candidate")
                 {
+                    Debug.WriteLine("[WebRTC] Received ICE candidate");
                     var candidate = JsonConvert.DeserializeObject<RTCIceCandidateInit>(message.Payload);
                     if (candidate != null) _pc.addIceCandidate(candidate);
                 }
             }
-            catch (Exception ex) { Debug.WriteLine(ex.Message); }
+            catch (Exception ex) 
+            { 
+                Debug.WriteLine($"[WebRTC Signaling Error] {ex.Message}"); 
+            }
         }
 
         public async Task DisposeAsync()
         {
-            _dataChannel?.close();
-            _pc?.close();
-            if (_signalingService != null)
-                _signalingService.OnMessageReceived -= HandleSignalingMessage;
+            try
+            {
+                _dataChannel?.close();
+                _pc?.close();
+                if (_signalingService != null)
+                    _signalingService.OnMessageReceived -= HandleSignalingMessage;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[WebRTC] Error disposing: {ex.Message}");
+            }
             await Task.CompletedTask;
         }
     }

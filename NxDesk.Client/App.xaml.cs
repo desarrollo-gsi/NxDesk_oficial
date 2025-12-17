@@ -153,7 +153,7 @@ namespace NxDesk.Client
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error crítico al iniciar servicios en segundo plano:\n{ex.Message}", "Error de Inicio", MessageBoxButton.OK, MessageBoxImage.Error);
+                Debug.WriteLine($"Error iniciando servicios: {ex.Message}");
             }
 
             var builder = new ConfigurationBuilder()

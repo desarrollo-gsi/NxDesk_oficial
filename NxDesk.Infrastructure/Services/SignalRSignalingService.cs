@@ -12,6 +12,10 @@ namespace NxDesk.Infrastructure.Services
         private readonly string _serverUrl;
         private HubConnection _hubConnection;
         private string _roomId;
+        
+        // Configuración de reintentos
+        private const int MAX_RETRY_ATTEMPTS = 3;
+        private const int INITIAL_RETRY_DELAY_MS = 1000;
 
         public event Func<SdpMessage, Task> OnMessageReceived;
 
@@ -29,12 +33,52 @@ namespace NxDesk.Infrastructure.Services
                           ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
                       };
                   })
-                    .WithAutomaticReconnect()
-                    .Build();
+                  .WithAutomaticReconnect(new[] { 
+                      TimeSpan.FromSeconds(0), 
+                      TimeSpan.FromSeconds(2), 
+                      TimeSpan.FromSeconds(5), 
+                      TimeSpan.FromSeconds(10),
+                      TimeSpan.FromSeconds(30)
+                  })
+                  .Build();
+
+            // Manejo de reconexión
+            _hubConnection.Reconnecting += error =>
+            {
+                Debug.WriteLine($"[SignalR] Reconectando... Error: {error?.Message}");
+                return Task.CompletedTask;
+            };
+
+            _hubConnection.Reconnected += connectionId =>
+            {
+                Debug.WriteLine($"[SignalR] Reconectado con ID: {connectionId}");
+                // Reincorporarse a la sala después de reconectar
+                if (!string.IsNullOrEmpty(_roomId))
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await _hubConnection.InvokeAsync("JoinRoom", _roomId);
+                            Debug.WriteLine($"[SignalR] Reincorporado a la sala: {_roomId}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.WriteLine($"[SignalR] Error al reincorporarse: {ex.Message}");
+                        }
+                    });
+                }
+                return Task.CompletedTask;
+            };
+
+            _hubConnection.Closed += error =>
+            {
+                Debug.WriteLine($"[SignalR] Conexión cerrada. Error: {error?.Message}");
+                return Task.CompletedTask;
+            };
 
             _hubConnection.On<SdpMessage>("ReceiveMessage", async (message) =>
             {
-                // --- LOG DE DEPURACIÓN ---
                 Debug.WriteLine($"[SignalR] Mensaje recibido del Host. Tipo: {message.Type}");
 
                 if (OnMessageReceived != null)
@@ -49,32 +93,69 @@ namespace NxDesk.Infrastructure.Services
         public async Task<bool> ConnectAsync(string roomId)
         {
             _roomId = roomId;
-            try
+            
+            // Implementar reintentos con backoff exponencial
+            int attempt = 0;
+            int delayMs = INITIAL_RETRY_DELAY_MS;
+            
+            while (attempt < MAX_RETRY_ATTEMPTS)
             {
-                if (_hubConnection.State == HubConnectionState.Disconnected)
+                try
                 {
-                    Debug.WriteLine($"[SignalR] Conectando a {_serverUrl}...");
-                    await _hubConnection.StartAsync();
-                    Debug.WriteLine("[SignalR] Conexión establecida.");
-                }
+                    if (_hubConnection.State == HubConnectionState.Disconnected)
+                    {
+                        Debug.WriteLine($"[SignalR] Conectando a {_serverUrl}... (Intento {attempt + 1}/{MAX_RETRY_ATTEMPTS})");
+                        
+                        // Timeout para la conexión
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                        await _hubConnection.StartAsync(cts.Token);
+                        
+                        Debug.WriteLine("[SignalR] Conexión establecida.");
+                    }
 
-                await _hubConnection.InvokeAsync("JoinRoom", _roomId);
-                Debug.WriteLine($"[SignalR] Unido a la sala: {_roomId}");
-                return true;
+                    await _hubConnection.InvokeAsync("JoinRoom", _roomId);
+                    Debug.WriteLine($"[SignalR] Unido a la sala: {_roomId}");
+                    return true;
+                }
+                catch (OperationCanceledException)
+                {
+                    Debug.WriteLine($"[SignalR] Timeout en conexión (intento {attempt + 1})");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SignalR Error] Intento {attempt + 1}: {ex.Message}");
+                }
+                
+                attempt++;
+                if (attempt < MAX_RETRY_ATTEMPTS)
+                {
+                    Debug.WriteLine($"[SignalR] Reintentando en {delayMs}ms...");
+                    await Task.Delay(delayMs);
+                    delayMs *= 2; // Backoff exponencial
+                }
             }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"[SignalR Error] {ex.Message}");
-                return false;
-            }
+            
+            Debug.WriteLine($"[SignalR] Falló después de {MAX_RETRY_ATTEMPTS} intentos");
+            return false;
         }
 
         public async Task RelayMessageAsync(SdpMessage message)
         {
             if (_hubConnection.State == HubConnectionState.Connected)
             {
-                Debug.WriteLine($"[SignalR] Enviando mensaje al Host: {message.Type}");
-                await _hubConnection.InvokeAsync("RelayMessage", _roomId, message);
+                try
+                {
+                    Debug.WriteLine($"[SignalR] Enviando mensaje al Host: {message.Type}");
+                    await _hubConnection.InvokeAsync("RelayMessage", _roomId, message);
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SignalR] Error enviando mensaje: {ex.Message}");
+                }
+            }
+            else
+            {
+                Debug.WriteLine($"[SignalR] No se puede enviar mensaje, estado: {_hubConnection.State}");
             }
         }
     }

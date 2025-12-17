@@ -10,7 +10,11 @@ namespace NxDesk.Application.Interfaces
         Task DisposeAsync();
 
         event Action<string> OnConnectionStateChanged;
+        
         event Action<byte[]> OnVideoFrameReceived;
+        
+        event Action<RawVideoFrame> OnRawFrameReceived;
+        
         event Action<List<string>> OnScreensInfoReceived;
     }
 }
