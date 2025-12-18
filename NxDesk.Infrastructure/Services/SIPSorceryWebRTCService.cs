@@ -97,8 +97,7 @@ namespace NxDesk.Infrastructure.Services
                                 _statsStopwatch.Restart();
                             }
                             
-                            // Siempre enviar formato BMP (más estable por ahora)
-                            // TODO: Optimizar con WriteableBitmap una vez validado
+                            // Enviar formato BMP (más estable)
                             var bmpBytes = CreateBitmapFromPixels(sample.Sample, (int)sample.Width, (int)sample.Height);
                             if (bmpBytes != null && OnVideoFrameReceived != null)
                             {
