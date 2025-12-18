@@ -24,13 +24,14 @@ namespace NxDesk.Application.DTOs
         /// <summary>
         /// Stride (bytes por fila). Normalmente Width * 4 para BGRA.
         /// </summary>
-        public int Stride => Width * 4;
+        public int Stride { get; set; }
         
         public RawVideoFrame(byte[] pixels, int width, int height)
         {
             Pixels = pixels;
             Width = width;
             Height = height;
+            Stride = width * 4; // Default stride
         }
     }
 }

@@ -74,12 +74,10 @@ namespace NxDesk.Infrastructure.Services
                     {
                         iceServers = new List<RTCIceServer>
                         {
-                            // Múltiples servidores STUN para mejor conectividad
                             new() { urls = "stun:stun.l.google.com:19302" },
                             new() { urls = "stun:stun1.l.google.com:19302" },
                             new() { urls = "stun:stun2.l.google.com:19302" },
                             new() { urls = "stun:stun.cloudflare.com:3478" },
-                            // Servidor TURN gratuito para NAT estrictos
                             new() 
                             { 
                                 urls = "turn:openrelay.metered.ca:80",
@@ -96,7 +94,6 @@ namespace NxDesk.Infrastructure.Services
                     };
                     _peerConnection = new RTCPeerConnection(config);
 
-                    // Usamos VP8 estándar
                     var videoFormats = new List<VideoFormat> { new VideoFormat(VideoCodecsEnum.VP8, 96) };
                     var videoTrack = new MediaStreamTrack(videoFormats, MediaStreamStatusEnum.SendOnly);
                     _peerConnection.addTrack(videoTrack);
@@ -143,14 +140,19 @@ namespace NxDesk.Infrastructure.Services
 
         private async Task CaptureLoop()
         {
-            // Intentar inicializar DXGI primero
             _dxgiCapture = new DesktopDuplicationCapture();
             _useDxgi = _dxgiCapture.Initialize(_currentScreenIndex);
-            // Usar siempre GDI por estabilidad (DXGI tiene problemas con frames vacíos)
-            Log("[Host] CaptureLoop: Usando GDI para captura estable");
-            _useDxgi = false;
-            _dxgiCapture?.Dispose();
-            _dxgiCapture = null;
+
+            if (_useDxgi)
+            {
+                Log("[Host] CaptureLoop: Usando DXGI (GPU) para captura.");
+            }
+            else
+            {
+                Log("[Host] CaptureLoop: Falló DXGI, usando GDI (CPU) como fallback.");
+                _dxgiCapture?.Dispose();
+                _dxgiCapture = null;
+            }
 
             while (_isCapturing)
             {
@@ -189,7 +191,6 @@ namespace NxDesk.Infrastructure.Services
                                 uint timestamp = (uint)(DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond);
                                 _peerConnection.SendVideo(timestamp, encodedBuffer);
                                 
-                                // Estadísticas de FPS cada 5 segundos
                                 _frameCount++;
                                 if (_fpsStopwatch.ElapsedMilliseconds >= 5000)
                                 {
@@ -207,20 +208,15 @@ namespace NxDesk.Infrastructure.Services
                     Log($"[Capture Error] {ex.Message}");
                 }
 
-                // Control de FPS (Objetivo: ~30 FPS)
                 var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
-                var waitTime = Math.Max(1, 33 - (int)elapsed); // 33ms = 30 FPS
+                var waitTime = Math.Max(1, 33 - (int)elapsed); 
                 await Task.Delay(waitTime);
             }
             
-            // Cleanup
             _dxgiCapture?.Dispose();
             _dxgiCapture = null;
         }
 
-        /// <summary>
-        /// Captura de pantalla con GDI (fallback).
-        /// </summary>
         private Bitmap CaptureScreenGDI()
         {
             try
@@ -232,7 +228,6 @@ namespace NxDesk.Infrastructure.Services
                 int width = bounds.Width;
                 int height = bounds.Height;
 
-                // VP8 requiere dimensiones pares
                 if (width % 2 != 0) width--;
                 if (height % 2 != 0) height--;
 
@@ -275,7 +270,6 @@ namespace NxDesk.Infrastructure.Services
                 bmpData = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, bmp.PixelFormat);
                 int bytes = Math.Abs(bmpData.Stride) * bmp.Height;
                 
-                // Reutilizar buffer si el tamaño es el mismo
                 if (_captureBuffer == null || _lastBufferSize != bytes)
                 {
                     _captureBuffer = new byte[bytes];
@@ -291,7 +285,6 @@ namespace NxDesk.Infrastructure.Services
             }
         }
 
-        // --- MANEJO DE INPUTS (MOUSE/TECLADO) ---
         private void HandleInputData(byte[] data)
         {
             try
