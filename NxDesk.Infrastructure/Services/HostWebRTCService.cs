@@ -9,8 +9,8 @@ using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.IO;
-using System.Drawing; // Necesario para Bitmap y Screen
-using System.Windows.Forms; // Necesario para Screen.AllScreens
+using System.Drawing; 
+using System.Windows.Forms; 
 using System.Threading.Tasks;
 using System.Threading;
 using System.Collections.Generic;
@@ -21,7 +21,6 @@ namespace NxDesk.Infrastructure.Services
 {
     public class HostWebRTCService
     {
-        // --- IMPORTACIONES NATIVAS PARA FALLBACK GDI ---
         [DllImport("user32.dll")] private static extern IntPtr GetDesktopWindow();
         [DllImport("user32.dll")] private static extern IntPtr GetWindowDC(IntPtr hWnd);
         [DllImport("user32.dll")] private static extern IntPtr ReleaseDC(IntPtr hWnd, IntPtr hDC);
@@ -42,19 +41,15 @@ namespace NxDesk.Infrastructure.Services
         private RTCDataChannel _dataChannel;
         private readonly VpxVideoEncoder _vpxEncoder = new VpxVideoEncoder();
 
-        // DXGI Desktop Duplication
         private DesktopDuplicationCapture _dxgiCapture;
         private bool _useDxgi = true;
 
-        // Estadísticas
         private readonly Stopwatch _fpsStopwatch = Stopwatch.StartNew();
         private int _frameCount = 0;
 
-        // Buffers reutilizables para evitar allocations (mejora FPS)
         private byte[] _captureBuffer;
         private int _lastBufferSize = 0;
 
-        // --- VARIABLES DE CACHÉ PARA OPTIMIZACIÓN GDI (NUEVAS) ---
         private Bitmap _cachedBitmap;
         private int _cachedWidth;
         private int _cachedHeight;
@@ -65,6 +60,9 @@ namespace NxDesk.Infrastructure.Services
             _signalingService = signalingService;
             _inputSimulator = inputSimulator;
             _signalingService.OnMessageReceived += HandleSignalingMessage;
+            
+            // Bitrate MÁXIMO para máxima calidad
+            _vpxEncoder.TargetKbps = 30000; // 30 Mbps
         }
 
         public async Task StartAsync(string hostId)
@@ -139,7 +137,6 @@ namespace NxDesk.Infrastructure.Services
         private async Task CaptureLoop()
         {
             _dxgiCapture = new DesktopDuplicationCapture();
-            // Intenta inicializar DXGI
             _useDxgi = _dxgiCapture.Initialize(_currentScreenIndex);
 
             if (_useDxgi)
@@ -170,13 +167,8 @@ namespace NxDesk.Infrastructure.Services
                     int width = 0;
                     int height = 0;
 
-                    // LÓGICA DE CAPTURA
                     if (_useDxgi)
                     {
-                        // Si tienes implementado DXGI correctamente:
-                        // rawBuffer = _dxgiCapture.GetFrame(out width, out height);
-
-                        // Si falla o no está implementado, fallback a GDI optimizado:
                         if (rawBuffer == null)
                         {
                             var bmp = CaptureScreenGDI_Optimized();
@@ -190,7 +182,6 @@ namespace NxDesk.Infrastructure.Services
                     }
                     else
                     {
-                        // Usamos la versión optimizada de GDI
                         var bmp = CaptureScreenGDI_Optimized();
                         if (bmp != null)
                         {
@@ -206,7 +197,7 @@ namespace NxDesk.Infrastructure.Services
                         width,
                         height,
                         rawBuffer,
-                        VideoPixelFormatsEnum.Bgr, // Usa Bgr para que los colores sean correctos
+                        VideoPixelFormatsEnum.Bgr, 
                         VideoCodecsEnum.VP8);
 
                         if (encodedBuffer != null)
@@ -230,20 +221,18 @@ namespace NxDesk.Infrastructure.Services
                     Log($"[Capture Error] {ex.Message}");
                 }
 
-                // Control de FPS
+                // Control de FPS (45 FPS para máxima fluidez)
                 var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
-                var waitTime = Math.Max(1, 33 - (int)elapsed);
+                var waitTime = Math.Max(1, 22 - (int)elapsed); 
                 await Task.Delay(waitTime);
             }
 
-            // LIMPIEZA DENTRO DEL MÉTODO
             _dxgiCapture?.Dispose();
             _dxgiCapture = null;
             _cachedBitmap?.Dispose();
             _cachedBitmap = null;
         }
 
-        // MÉTODO OPTIMIZADO PARA NO RECREAR BITMAPS
         private Bitmap CaptureScreenGDI_Optimized()
         {
             try
@@ -255,17 +244,14 @@ namespace NxDesk.Infrastructure.Services
                 int width = bounds.Width;
                 int height = bounds.Height;
 
-                // VP8 requiere dimensiones pares
                 if (width % 2 != 0) width--;
                 if (height % 2 != 0) height--;
 
-                // Solo creamos un nuevo Bitmap si la resolución cambia o es nulo
                 if (_cachedBitmap == null || _cachedWidth != width || _cachedHeight != height)
                 {
                     _cachedBitmap?.Dispose();
                     _cachedWidth = width;
                     _cachedHeight = height;
-                    // Usamos Format24bppRgb para quitar canal Alpha y arreglar colores invertidos
                     _cachedBitmap = new Bitmap(width, height, PixelFormat.Format24bppRgb);
                 }
 
@@ -288,16 +274,12 @@ namespace NxDesk.Infrastructure.Services
             BitmapData bmpData = null;
             try
             {
-                // 1. Bloqueamos los bits de la imagen
                 bmpData = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, bmp.PixelFormat);
 
-                // 2. Calculamos el ancho REAL de los datos (sin padding)
-                // Como usamos Format24bppRgb, son 3 bytes por píxel.
                 int bytesPerPixel = 3;
                 int widthInBytes = bmp.Width * bytesPerPixel;
                 int height = bmp.Height;
 
-                // 3. Preparamos el buffer del tamaño exacto que espera el codificador WebRTC (sin huecos)
                 int totalBytes = widthInBytes * height;
 
                 if (_captureBuffer == null || _captureBuffer.Length != totalBytes)
@@ -306,20 +288,15 @@ namespace NxDesk.Infrastructure.Services
                     _lastBufferSize = totalBytes;
                 }
 
-                // 4. COPIA LÍNEA POR LÍNEA (Esto arregla la distorsión)
-                // El 'Stride' es el ancho real en memoria (con relleno).
-                // Nosotros solo queremos copiar 'widthInBytes' (sin relleno).
                 IntPtr currentSrcPtr = bmpData.Scan0;
                 int currentDstOffset = 0;
 
                 for (int i = 0; i < height; i++)
                 {
-                    // Copiamos solo los datos válidos de la fila
                     Marshal.Copy(currentSrcPtr, _captureBuffer, currentDstOffset, widthInBytes);
 
-                    // Avanzamos los punteros
-                    currentSrcPtr += bmpData.Stride; // Saltamos al inicio de la siguiente fila (saltando el padding)
-                    currentDstOffset += widthInBytes; // Avanzamos en nuestro buffer limpio
+                    currentSrcPtr += bmpData.Stride; 
+                    currentDstOffset += widthInBytes; 
                 }
 
                 return _captureBuffer;
