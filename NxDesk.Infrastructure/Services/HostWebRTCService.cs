@@ -61,8 +61,7 @@ namespace NxDesk.Infrastructure.Services
             _inputSimulator = inputSimulator;
             _signalingService.OnMessageReceived += HandleSignalingMessage;
             
-            // Bitrate MÁXIMO para máxima calidad
-            _vpxEncoder.TargetKbps = 30000; // 30 Mbps
+            _vpxEncoder.TargetKbps = 40000;
         }
 
         public async Task StartAsync(string hostId)
@@ -221,7 +220,6 @@ namespace NxDesk.Infrastructure.Services
                     Log($"[Capture Error] {ex.Message}");
                 }
 
-                // Control de FPS (45 FPS para máxima fluidez)
                 var elapsed = (DateTime.Now - startTime).TotalMilliseconds;
                 var waitTime = Math.Max(1, 22 - (int)elapsed); 
                 await Task.Delay(waitTime);
@@ -257,6 +255,8 @@ namespace NxDesk.Infrastructure.Services
 
                 using (Graphics g = Graphics.FromImage(_cachedBitmap))
                 {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                    g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighSpeed;
                     g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, new Size(width, height), CopyPixelOperation.SourceCopy);
                 }
 

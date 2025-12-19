@@ -89,7 +89,6 @@ namespace NxDesk.Infrastructure.Services
                         {
                             _decodedFrameCount++;
                             
-                            // Log estadísticas cada segundo
                             if (_statsStopwatch.ElapsedMilliseconds >= 1000)
                             {
                                 Debug.WriteLine($"[WebRTC] Decoded FPS: {_decodedFrameCount}, Frame size: {sample.Width}x{sample.Height}");
@@ -97,7 +96,7 @@ namespace NxDesk.Infrastructure.Services
                                 _statsStopwatch.Restart();
                             }
                             
-                            // Enviar formato BMP (más estable)
+                            // Enviar formato BMP
                             var bmpBytes = CreateBitmapFromPixels(sample.Sample, (int)sample.Width, (int)sample.Height);
                             if (bmpBytes != null && OnVideoFrameReceived != null)
                             {
