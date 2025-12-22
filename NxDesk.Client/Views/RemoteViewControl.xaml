@@ -7,6 +7,6 @@
               RenderOptions.BitmapScalingMode="HighQuality"
               RenderOptions.EdgeMode="Aliased"
               SnapsToDevicePixels="True"
-              Cursor="Cross"/>
+              Cursor="Arrow"/>
     </Border>
 </UserControl>
