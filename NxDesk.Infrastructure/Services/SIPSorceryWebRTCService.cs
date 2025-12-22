@@ -1,4 +1,4 @@
-ï»¿using Newtonsoft.Json;
+using Newtonsoft.Json;
 using NxDesk.Application.DTOs;
 using NxDesk.Application.Interfaces;
 using SIPSorcery.Net;
@@ -24,7 +24,6 @@ namespace NxDesk.Infrastructure.Services
         public event Action<RawVideoFrame> OnRawFrameReceived;
         public event Action<List<string>> OnScreensInfoReceived;
         
-        // EstadÃ­sticas de frames
         private int _decodedFrameCount = 0;
         private readonly Stopwatch _statsStopwatch = Stopwatch.StartNew();
         
@@ -36,19 +35,22 @@ namespace NxDesk.Infrastructure.Services
         
         public async Task<bool> StartConnectionAsync(string hostId)
         {
+            System.Diagnostics.Trace.WriteLine($"[CLIENT] Iniciando conexión a host: {hostId}");
             OnConnectionStateChanged?.Invoke("Conectando...");
             
             if (!await _signalingService.ConnectAsync(hostId))
             {
-                OnConnectionStateChanged?.Invoke("Error de seÃ±alizaciÃ³n");
+                System.Diagnostics.Trace.WriteLine("[CLIENT] Error: No se pudo conectar al SignalingServer");
+                OnConnectionStateChanged?.Invoke("Error de señalización");
                 return false;
             }
+            System.Diagnostics.Trace.WriteLine("[CLIENT] Conectado al SignalingServer");
             
             var config = new RTCConfiguration
             {
                 iceServers = new List<RTCIceServer> 
                 { 
-                    // MÃºltiples servidores STUN para mejor conectividad
+                    // Múltiples servidores STUN para mejor conectividad
                     new() { urls = "stun:stun.l.google.com:19302" },
                     new() { urls = "stun:stun1.l.google.com:19302" },
                     new() { urls = "stun:stun2.l.google.com:19302" },
@@ -80,42 +82,53 @@ namespace NxDesk.Infrastructure.Services
             
             _pc.OnVideoFrameReceived += (endpoint, timestamp, frame, format) =>
             {
+                System.Diagnostics.Trace.WriteLine($"[CLIENT] Frame recibido: {frame?.Length ?? 0} bytes, format: {format}");
+                
                 try
                 {
-                    var rawSamples = _vpxDecoder.DecodeVideo(frame, VideoPixelFormatsEnum.Bgra, VideoCodecsEnum.VP8);
-                    if (rawSamples != null)
+                    if (frame == null || frame.Length == 0)
                     {
-                        foreach (var sample in rawSamples)
+                        System.Diagnostics.Trace.WriteLine("[CLIENT] Frame vacío recibido");
+                        return;
+                    }
+                    
+                    var rawSamples = _vpxDecoder.DecodeVideo(frame, VideoPixelFormatsEnum.Bgra, VideoCodecsEnum.VP8);
+                    
+                    if (rawSamples == null)
+                    {
+                        System.Diagnostics.Trace.WriteLine("[CLIENT] Decoder retornó null");
+                        return;
+                    }
+                    
+                    foreach (var sample in rawSamples)
+                    {
+                        _decodedFrameCount++;
+                        
+                        if (_statsStopwatch.ElapsedMilliseconds >= 1000)
                         {
-                            _decodedFrameCount++;
-                            
-                            if (_statsStopwatch.ElapsedMilliseconds >= 1000)
-                            {
-                                Debug.WriteLine($"[WebRTC] Decoded FPS: {_decodedFrameCount}, Frame size: {sample.Width}x{sample.Height}");
-                                _decodedFrameCount = 0;
-                                _statsStopwatch.Restart();
-                            }
-                            
-                            // Enviar formato BMP
-                            var bmpBytes = CreateBitmapFromPixels(sample.Sample, (int)sample.Width, (int)sample.Height);
-                            if (bmpBytes != null && OnVideoFrameReceived != null)
-                            {
-                                System.Windows.Application.Current?.Dispatcher.BeginInvoke(
-                                    System.Windows.Threading.DispatcherPriority.Render,
-                                    () => OnVideoFrameReceived?.Invoke(bmpBytes));
-                            }
+                            System.Diagnostics.Trace.WriteLine($"[CLIENT] Decoded FPS: {_decodedFrameCount}, Frame size: {sample.Width}x{sample.Height}");
+                            _decodedFrameCount = 0;
+                            _statsStopwatch.Restart();
+                        }
+                        
+                        var bmpBytes = CreateBitmapFromPixels(sample.Sample, (int)sample.Width, (int)sample.Height);
+                        if (bmpBytes != null && OnVideoFrameReceived != null)
+                        {
+                            System.Windows.Application.Current?.Dispatcher.BeginInvoke(
+                                System.Windows.Threading.DispatcherPriority.Render,
+                                () => OnVideoFrameReceived?.Invoke(bmpBytes));
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"[CLIENT DECODE ERROR] {ex.Message}");
+                    System.Diagnostics.Trace.WriteLine($"[CLIENT DECODE ERROR] {ex.Message}");
                 }
             };
             
             _pc.onconnectionstatechange += state =>
             {
-                Debug.WriteLine($"[WebRTC] Connection state: {state}");
+                System.Diagnostics.Trace.WriteLine($"[CLIENT] WebRTC Connection state: {state}");
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
                     OnConnectionStateChanged?.Invoke(state.ToString());
@@ -126,7 +139,7 @@ namespace NxDesk.Infrastructure.Services
             {
                 if (candidate != null && !string.IsNullOrWhiteSpace(candidate.candidate))
                 {
-                    Debug.WriteLine($"[WebRTC] Sending ICE candidate");
+                    System.Diagnostics.Trace.WriteLine($"[CLIENT] Enviando ICE candidate");
                     await _signalingService.RelayMessageAsync(new SdpMessage
                     {
                         Type = "ice-candidate",
@@ -137,7 +150,7 @@ namespace NxDesk.Infrastructure.Services
             
             _pc.onicegatheringstatechange += state =>
             {
-                Debug.WriteLine($"[WebRTC] ICE gathering state: {state}");
+                System.Diagnostics.Trace.WriteLine($"[CLIENT] ICE gathering state: {state}");
             };
             
             _dataChannel = await _pc.createDataChannel("input-channel");
@@ -145,7 +158,7 @@ namespace NxDesk.Infrastructure.Services
             {
                 _dataChannel.onopen += () => 
                 {
-                    Debug.WriteLine("[WebRTC] Data channel opened");
+                    System.Diagnostics.Trace.WriteLine("[CLIENT] DataChannel abierto");
                     RequestScreenList();
                 };
                 _dataChannel.onmessage += (_, _, data) =>
@@ -167,7 +180,7 @@ namespace NxDesk.Infrastructure.Services
             var offer = _pc.createOffer(null);
             await _pc.setLocalDescription(offer);
             
-            Debug.WriteLine("[WebRTC] Sending offer");
+            System.Diagnostics.Trace.WriteLine("[CLIENT] Enviando offer al host");
             await _signalingService.RelayMessageAsync(new SdpMessage
             {
                 Type = "offer",
@@ -247,24 +260,25 @@ namespace NxDesk.Infrastructure.Services
             {
                 if (message.Type == "answer")
                 {
-                    Debug.WriteLine("[WebRTC] Received answer");
+                    System.Diagnostics.Trace.WriteLine("[CLIENT] Answer recibida del host");
                     var sdpInit = new RTCSessionDescriptionInit
                     {
                         type = RTCSdpType.answer,
                         sdp = message.Payload
                     };
                     _pc.setRemoteDescription(sdpInit);
+                    System.Diagnostics.Trace.WriteLine("[CLIENT] Remote description establecida");
                 }
                 else if (message.Type == "ice-candidate")
                 {
-                    Debug.WriteLine("[WebRTC] Received ICE candidate");
+                    System.Diagnostics.Trace.WriteLine("[CLIENT] ICE candidate recibido del host");
                     var candidate = JsonConvert.DeserializeObject<RTCIceCandidateInit>(message.Payload);
                     if (candidate != null) _pc.addIceCandidate(candidate);
                 }
             }
             catch (Exception ex) 
             { 
-                Debug.WriteLine($"[WebRTC Signaling Error] {ex.Message}"); 
+                System.Diagnostics.Trace.WriteLine($"[CLIENT Signaling Error] {ex.Message}"); 
             }
         }
 

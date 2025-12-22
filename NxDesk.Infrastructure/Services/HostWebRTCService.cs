@@ -88,13 +88,21 @@ namespace NxDesk.Infrastructure.Services
                         }
                     };
                     _peerConnection = new RTCPeerConnection(config);
+                    Log("[Host] PeerConnection creado");
+
+                    _peerConnection.onconnectionstatechange += (state) =>
+                    {
+                        Log($"[Host] Connection state: {state}");
+                    };
 
                     var videoFormats = new List<VideoFormat> { new VideoFormat(VideoCodecsEnum.VP8, 96) };
                     var videoTrack = new MediaStreamTrack(videoFormats, MediaStreamStatusEnum.SendOnly);
                     _peerConnection.addTrack(videoTrack);
+                    Log("[Host] Video track agregado");
 
                     _peerConnection.ondatachannel += (dc) =>
                     {
+                        Log("[Host] DataChannel recibido");
                         _dataChannel = dc;
                         dc.onopen += SendScreenList;
                         dc.onmessage += (channel, protocol, data) => HandleInputData(data);
@@ -104,6 +112,7 @@ namespace NxDesk.Infrastructure.Services
                     {
                         if (candidate?.candidate != null)
                         {
+                            Log("[Host] Enviando ICE candidate");
                             await _signalingService.RelayMessageAsync(new SdpMessage
                             {
                                 Type = "ice-candidate",
@@ -115,23 +124,28 @@ namespace NxDesk.Infrastructure.Services
                     var offerSdp = SDP.ParseSDPDescription(message.Payload);
                     var offerInit = new RTCSessionDescriptionInit { type = RTCSdpType.offer, sdp = offerSdp.ToString() };
                     _peerConnection.setRemoteDescription(offerInit);
+                    Log("[Host] Remote description establecida");
 
                     var answer = _peerConnection.createAnswer(null);
                     await _peerConnection.setLocalDescription(answer);
+                    Log("[Host] Local description establecida");
 
                     await _signalingService.RelayMessageAsync(new SdpMessage { Type = "answer", Payload = answer.sdp });
+                    Log("[Host] Answer enviada, iniciando captura...");
 
                     _isCapturing = true;
                     _ = Task.Run(CaptureLoop);
                 }
                 else if (message.Type == "ice-candidate")
                 {
+                    Log("[Host] ICE candidate recibido");
                     var candidateInit = JsonConvert.DeserializeObject<RTCIceCandidateInit>(message.Payload);
                     if (candidateInit != null) _peerConnection?.addIceCandidate(candidateInit);
                 }
             }
             catch (Exception ex) { Log($"[Signaling Error] {ex.Message}"); }
         }
+
 
         private async Task CaptureLoop()
         {
@@ -269,6 +283,7 @@ namespace NxDesk.Infrastructure.Services
             }
         }
 
+
         private byte[] BitmapToBytes(Bitmap bmp)
         {
             BitmapData bmpData = null;
@@ -379,8 +394,10 @@ namespace NxDesk.Infrastructure.Services
         {
             try
             {
+                var logLine = $"{DateTime.Now:HH:mm:ss} {message}";
+                Console.WriteLine(logLine);
                 System.Diagnostics.Debug.WriteLine(message);
-                File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "host_service.log"), $"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}");
+                File.AppendAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "host_service.log"), $"{logLine}{Environment.NewLine}");
             }
             catch { }
         }
