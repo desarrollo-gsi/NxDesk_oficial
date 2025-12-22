@@ -18,6 +18,23 @@ namespace NxDesk.Client.Views
         {
             InitializeComponent();
 
+            // Permitir que el control reciba foco para capturar teclado
+            this.Focusable = true;
+            this.Loaded += (s, e) => this.Focus();
+            this.MouseDown += (s, e) => this.Focus(); // Click para enfocar
+
+            // Eventos de teclado
+            this.KeyDown += (s, e) =>
+            {
+                OnInputEvent?.Invoke(new InputEvent { EventType = "keydown", Key = e.Key.ToString() });
+                e.Handled = true;
+            };
+            this.KeyUp += (s, e) =>
+            {
+                OnInputEvent?.Invoke(new InputEvent { EventType = "keyup", Key = e.Key.ToString() });
+                e.Handled = true;
+            };
+
             VideoImage.MouseMove += (s, e) => 
             {
                 // Throttle: solo enviar si han pasado al menos MOUSE_THROTTLE_MS
