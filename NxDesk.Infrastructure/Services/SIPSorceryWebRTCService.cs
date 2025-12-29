@@ -288,14 +288,21 @@ namespace NxDesk.Infrastructure.Services
             {
                 _dataChannel?.close();
                 _pc?.close();
+
                 if (_signalingService != null)
+                {
                     _signalingService.OnMessageReceived -= HandleSignalingMessage;
+
+                    // --- AGREGAR ESTA LÍNEA ---
+                    await _signalingService.LeaveRoomAsync();
+                    // --------------------------
+                }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[WebRTC] Error disposing: {ex.Message}");
             }
-            await Task.CompletedTask;
+            // await Task.CompletedTask; // (Puedes borrar esto si ya usas await arriba)
         }
     }
 }

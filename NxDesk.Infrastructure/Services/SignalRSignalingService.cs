@@ -138,6 +138,27 @@ namespace NxDesk.Infrastructure.Services
             Debug.WriteLine($"[SignalR] Falló después de {MAX_RETRY_ATTEMPTS} intentos");
             return false;
         }
+        public async Task LeaveRoomAsync()
+        {
+            if (!string.IsNullOrEmpty(_roomId) && _hubConnection.State == HubConnectionState.Connected)
+            {
+                try
+                {
+                    // Llamamos al nuevo método del Hub
+                    await _hubConnection.InvokeAsync("LeaveRoom", _roomId);
+                    Debug.WriteLine($"[SignalR] Saliendo de la sala: {_roomId}");
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"[SignalR] Error al salir de sala: {ex.Message}");
+                }
+                finally
+                {
+                    // Importante: Limpiamos el ID localmente
+                    _roomId = null;
+                }
+            }
+        }
 
         public async Task RelayMessageAsync(SdpMessage message)
         {

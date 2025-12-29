@@ -11,6 +11,11 @@ namespace NxDesk.SignalingServer.Hubs
             await Clients.OthersInGroup(roomId).SendAsync("ParticipantJoined");
         }
 
+        public async Task LeaveRoom(string roomId)
+        {
+            await Groups.RemoveFromGroupAsync(Context.ConnectionId, roomId);
+        }
+
         public async Task RelayMessage(string roomId, SdpMessage message)
         {
             await Clients.OthersInGroup(roomId).SendAsync("ReceiveMessage", message);
