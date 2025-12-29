@@ -72,6 +72,7 @@ namespace NxDesk.Client
             }
             else
             {
+                _remoteView.ClearFrame(); // Limpiar imagen pegada
                 ContentArea.Content = _welcomeView;
                 PreSessionControls.Visibility = Visibility.Visible;
                 InSessionControls.Visibility = Visibility.Collapsed;

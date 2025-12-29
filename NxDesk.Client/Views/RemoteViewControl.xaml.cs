@@ -57,6 +57,11 @@ namespace NxDesk.Client.Views
             VideoImage.Source = frame;
         }
 
+        public void ClearFrame()
+        {
+            VideoImage.Source = null;
+        }
+
         private void SendMouse(string type, MouseEventArgs e)
         {
             var pos = e.GetPosition(VideoImage);

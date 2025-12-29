@@ -35,13 +35,17 @@ namespace NxDesk.Infrastructure.Services
         
         public async Task<bool> StartConnectionAsync(string hostId)
         {
-            System.Diagnostics.Trace.WriteLine($"[CLIENT] Iniciando conexión a host: {hostId}");
+            System.Diagnostics.Trace.WriteLine($"[CLIENT] Iniciando conexiï¿½n a host: {hostId}");
             OnConnectionStateChanged?.Invoke("Conectando...");
             
+            // Asegurar que estamos suscritos al evento de seÃ±alizaciÃ³n (evitar duplicados)
+            _signalingService.OnMessageReceived -= HandleSignalingMessage;
+            _signalingService.OnMessageReceived += HandleSignalingMessage;
+
             if (!await _signalingService.ConnectAsync(hostId))
             {
                 System.Diagnostics.Trace.WriteLine("[CLIENT] Error: No se pudo conectar al SignalingServer");
-                OnConnectionStateChanged?.Invoke("Error de señalización");
+                OnConnectionStateChanged?.Invoke("Error de seï¿½alizaciï¿½n");
                 return false;
             }
             System.Diagnostics.Trace.WriteLine("[CLIENT] Conectado al SignalingServer");
@@ -50,7 +54,7 @@ namespace NxDesk.Infrastructure.Services
             {
                 iceServers = new List<RTCIceServer> 
                 { 
-                    // Múltiples servidores STUN para mejor conectividad
+                    // Mï¿½ltiples servidores STUN para mejor conectividad
                     new() { urls = "stun:stun.l.google.com:19302" },
                     new() { urls = "stun:stun1.l.google.com:19302" },
                     new() { urls = "stun:stun2.l.google.com:19302" },
@@ -88,7 +92,7 @@ namespace NxDesk.Infrastructure.Services
                 {
                     if (frame == null || frame.Length == 0)
                     {
-                        System.Diagnostics.Trace.WriteLine("[CLIENT] Frame vacío recibido");
+                        System.Diagnostics.Trace.WriteLine("[CLIENT] Frame vacï¿½o recibido");
                         return;
                     }
                     
@@ -96,7 +100,7 @@ namespace NxDesk.Infrastructure.Services
                     
                     if (rawSamples == null)
                     {
-                        System.Diagnostics.Trace.WriteLine("[CLIENT] Decoder retornó null");
+                        System.Diagnostics.Trace.WriteLine("[CLIENT] Decoder retornï¿½ null");
                         return;
                     }
                     
@@ -287,22 +291,24 @@ namespace NxDesk.Infrastructure.Services
             try
             {
                 _dataChannel?.close();
+                _dataChannel = null;
+                
                 _pc?.close();
+                _pc = null;
 
                 if (_signalingService != null)
                 {
                     _signalingService.OnMessageReceived -= HandleSignalingMessage;
 
-                    // --- AGREGAR ESTA LÍNEA ---
+                    // --- AGREGAR ESTA Lï¿½NEA ---
                     await _signalingService.LeaveRoomAsync();
-                    // --------------------------
-                }
+                    }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[WebRTC] Error disposing: {ex.Message}");
             }
-            // await Task.CompletedTask; // (Puedes borrar esto si ya usas await arriba)
-        }
+                    }
     }
 }
+
